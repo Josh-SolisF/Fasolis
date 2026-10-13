@@ -16,6 +16,10 @@ Formato de la trama (todo en big-endian):
   Sincronia(2)=AA 55 | Version(1) | Tipo(1) | Destino(2) | Origen(2) |
   Secuencia(1) | Fragmento(1) | Longitud(1) | Datos(0..115) | CRC-16(2)
 El CRC se calcula desde Version hasta Datos (binascii.crc_hqx, valor inicial 0).
+
+Tiempos: abrir() calcula guarda_eco, retardo_ack y timeout_byte a partir de
+la velocidad del puerto, para que el protocolo funcione igual a 100 baudios
+(el enlace actual del Faro) que a 1200 o mas.
 """
 
 import binascii
@@ -179,6 +183,9 @@ class DispositivoLuzAdaptador:
     guarda_eco:   segundos tras transmitir antes de limpiar el reflejo propio.
     retardo_ack:  pausa del esclavo antes de contestar, para que el otro Faro
                   termine de limpiar su eco. Debe ser mayor que guarda_eco.
+
+    Los valores por defecto sirven para pruebas con puertos virtuales. Con un
+    puerto real, abrir() los ajusta segun la velocidad.
     """
 
     def __init__(self, puerto, direccion, *, timeout_byte=0.3,
@@ -195,10 +202,20 @@ class DispositivoLuzAdaptador:
 
     @classmethod
     def abrir(cls, ruta="/dev/serial0", baudios=1200, direccion=None, **kw):
-        """Abre un puerto serie real (8N1) y crea el adaptador."""
+        """
+        Abre un puerto serie real (8N1) y crea el adaptador.
+
+        Los tiempos del protocolo se escalan con la velocidad: en 8N1 cada
+        byte ocupa 10 bits, asi que a 100 baudios un byte tarda 0,1 s y a
+        1200 baudios, 8,3 ms. Cualquier valor pasado en **kw tiene prioridad.
+        """
         import serial  # solo se necesita en el Faro real
         puerto = serial.Serial(ruta, baudios, bytesize=8, parity="N",
                                stopbits=1, timeout=0.05)
+        t_byte = 10 / baudios  # segundos por byte (8N1)
+        kw.setdefault("guarda_eco", max(0.01, 2 * t_byte))
+        kw.setdefault("retardo_ack", 2 * kw["guarda_eco"])
+        kw.setdefault("timeout_byte", max(0.3, 3 * t_byte))
         return cls(puerto, direccion if direccion is not None else generar_direccion(), **kw)
 
     # -- nivel bajo ---------------------------------------------------------
@@ -207,7 +224,7 @@ class DispositivoLuzAdaptador:
         datos = codificar(trama)
         self.puerto.write(datos)
         self.puerto.flush()  # espera a que el ultimo bit haya salido
-        # Semidúplex: el receptor puede haber visto el reflejo de nuestro LED.
+        # Semiduplex: el receptor puede haber visto el reflejo de nuestro LED.
         # Se ignora todo lo que llego mientras transmitiamos.
         time.sleep(self.guarda_eco)
         self.puerto.reset_input_buffer()
@@ -304,11 +321,14 @@ class DispositivoLuzAdaptador:
                 return False
         return True
 
-    def recibir_mensaje(self, timeout=None, timeout_fragmento=10.0):
+    def recibir_mensaje(self, timeout=None, timeout_fragmento=30.0):
         """
         ESCLAVO. Espera un mensaje completo, reensamblando sus fragmentos.
         Devuelve una Trama con todos los datos juntos, o None si vence el
         timeout o falta un fragmento (se abandona el mensaje a medias).
+
+        timeout_fragmento: espera maxima entre fragmentos. A 100 baudios una
+        trama de 128 bytes tarda 12,8 s en llegar, por eso 30 s.
         """
         en_curso = {}  # origen -> [tipo, datos, indice esperado]
         espera = timeout
