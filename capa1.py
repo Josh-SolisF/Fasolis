@@ -17,9 +17,16 @@ Formato de la trama (todo en big-endian):
   Secuencia(1) | Fragmento(1) | Longitud(1) | Datos(0..115) | CRC-16(2)
 El CRC se calcula desde Version hasta Datos (binascii.crc_hqx, valor inicial 0).
 
-Tiempos: abrir() calcula guarda_eco, retardo_ack y timeout_byte a partir de
-la velocidad del puerto, para que el protocolo funcione igual a 100 baudios
-(el enlace actual del Faro) que a 1200 o mas.
+Tiempos:
+  abrir() calcula todos los tiempos del protocolo a partir de la velocidad
+  del puerto, para que funcione igual a 100 baudios (enlace actual del Faro)
+  que a 1200 o mas. Dos detalles del puerto serie real de la Raspberry Pi
+  que se tuvieron en cuenta:
+    - El controlador entrega los bytes recibidos en grupos, no de uno en uno:
+      entre grupo y grupo puede haber pausas de varios "tiempos de byte".
+      Por eso timeout_byte es amplio.
+    - flush() podria regresar antes de que salga el ultimo bit con
+      velocidades no estandar; enviar() espera ademas el tiempo calculado.
 """
 
 import binascii
@@ -44,6 +51,7 @@ MAX_DATOS = 115
 _FORMATO_ENCABEZADO = ">BBHHBBB"  # version, tipo, destino, origen, secuencia, fragmento, longitud
 TAM_ENCABEZADO = struct.calcsize(_FORMATO_ENCABEZADO)  # 9
 TAM_MAX_TRAMA = len(SINCRONIA) + TAM_ENCABEZADO + MAX_DATOS + 2  # 128
+TAM_ACK = len(SINCRONIA) + TAM_ENCABEZADO + 2  # 13 (un ACK no lleva datos)
 
 
 @dataclass
@@ -183,18 +191,21 @@ class DispositivoLuzAdaptador:
     guarda_eco:   segundos tras transmitir antes de limpiar el reflejo propio.
     retardo_ack:  pausa del esclavo antes de contestar, para que el otro Faro
                   termine de limpiar su eco. Debe ser mayor que guarda_eco.
+    t_byte:       segundos que tarda un byte en el medio (0 = confiar solo en
+                  flush y no exigir una espera minima de ACK).
 
     Los valores por defecto sirven para pruebas con puertos virtuales. Con un
     puerto real, abrir() los ajusta segun la velocidad.
     """
 
     def __init__(self, puerto, direccion, *, timeout_byte=0.3,
-                 guarda_eco=0.01, retardo_ack=0.05):
+                 guarda_eco=0.01, retardo_ack=0.05, t_byte=0.0):
         self.puerto = puerto
         self.direccion = direccion
         self.timeout_byte = timeout_byte
         self.guarda_eco = guarda_eco
         self.retardo_ack = retardo_ack
+        self.t_byte = t_byte
         self._dec = Decodificador()
         self._cola = deque()
         self._seq = 0
@@ -213,17 +224,27 @@ class DispositivoLuzAdaptador:
         puerto = serial.Serial(ruta, baudios, bytesize=8, parity="N",
                                stopbits=1, timeout=0.05)
         t_byte = 10 / baudios  # segundos por byte (8N1)
-        kw.setdefault("guarda_eco", max(0.01, 2 * t_byte))
+        kw.setdefault("t_byte", t_byte)
+        # El controlador puede retener hasta ~32 bits antes de entregar lo
+        # recibido: la guarda cubre ese retraso para limpiar todo el eco.
+        kw.setdefault("guarda_eco", max(0.01, 4 * t_byte))
         kw.setdefault("retardo_ack", 2 * kw["guarda_eco"])
-        kw.setdefault("timeout_byte", max(0.3, 3 * t_byte))
+        # Los bytes llegan al programa en grupos: tolerar pausas largas.
+        kw.setdefault("timeout_byte", max(0.5, 30 * t_byte))
         return cls(puerto, direccion if direccion is not None else generar_direccion(), **kw)
 
     # -- nivel bajo ---------------------------------------------------------
     def enviar(self, trama: Trama) -> int:
         """Transmite una trama. Devuelve cuantos bytes salieron por la luz."""
         datos = codificar(trama)
+        inicio = time.monotonic()
         self.puerto.write(datos)
         self.puerto.flush()  # espera a que el ultimo bit haya salido
+        # Por si flush() regresa antes de que salga el ultimo bit
+        # (puede pasar con velocidades no estandar).
+        faltante = len(datos) * self.t_byte - (time.monotonic() - inicio)
+        if faltante > 0:
+            time.sleep(faltante)
         # Semiduplex: el receptor puede haber visto el reflejo de nuestro LED.
         # Se ignora todo lo que llego mientras transmitiamos.
         time.sleep(self.guarda_eco)
@@ -258,6 +279,13 @@ class DispositivoLuzAdaptador:
         self._seq = (self._seq + 1) % 256
         return self._seq
 
+    def espera_ack_minima(self) -> float:
+        """
+        Lo minimo que hay que esperar un ACK: la pausa del esclavo, lo que
+        tarda el ACK en viajar y un margen por el agrupamiento de bytes.
+        """
+        return self.retardo_ack + TAM_ACK * self.t_byte + self.timeout_byte
+
     def enviar_con_ack(self, destino, datos, *, tipo=TIPO_DATOS, fragmento=0,
                        reintentos=3, espera_ack=1.0) -> bool:
         """
@@ -265,12 +293,14 @@ class DispositivoLuzAdaptador:
         Si no llega, reintenta. Devuelve True si fue confirmada.
         La secuencia es la misma en todos los reintentos: asi el receptor
         puede detectar que es un duplicado.
+        La espera real nunca es menor que espera_ack_minima().
         """
+        espera = max(espera_ack, self.espera_ack_minima())
         trama = Trama(tipo, destino, self.direccion, self._siguiente_secuencia(),
                       bytes(datos), fragmento)
         for _ in range(reintentos):
             self.enviar(trama)
-            limite = time.monotonic() + espera_ack
+            limite = time.monotonic() + espera
             while (restante := limite - time.monotonic()) > 0:
                 r = self.recibir(timeout=restante)
                 if (r and r.tipo == TIPO_ACK and r.secuencia == trama.secuencia
@@ -321,15 +351,19 @@ class DispositivoLuzAdaptador:
                 return False
         return True
 
-    def recibir_mensaje(self, timeout=None, timeout_fragmento=30.0):
+    def recibir_mensaje(self, timeout=None, timeout_fragmento=None):
         """
         ESCLAVO. Espera un mensaje completo, reensamblando sus fragmentos.
         Devuelve una Trama con todos los datos juntos, o None si vence el
         timeout o falta un fragmento (se abandona el mensaje a medias).
 
-        timeout_fragmento: espera maxima entre fragmentos. A 100 baudios una
-        trama de 128 bytes tarda 12,8 s en llegar, por eso 30 s.
+        timeout_fragmento: espera maxima entre fragmentos. Si no se indica,
+        se calcula: lo que tarda una trama maxima, mas los tiempos de ACK y
+        reintento, con un minimo de 10 s. A 100 baudios queda en unos 30 s.
         """
+        if timeout_fragmento is None:
+            timeout_fragmento = max(
+                10.0, 2 * TAM_MAX_TRAMA * self.t_byte + 2 * self.espera_ack_minima())
         en_curso = {}  # origen -> [tipo, datos, indice esperado]
         espera = timeout
         while True:
