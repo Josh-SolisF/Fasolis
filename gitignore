@@ -1,0 +1,25 @@
+# --- Secretos: nunca deben subirse ---
+# Llaves privadas de los nodos (las que borra el boton de panico)
+*.llaves
+.faronet/
+# Secretos locales del Worker (wrangler) y variables de entorno
+.dev.vars
+.env
+.env.*
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Worker de Cloudflare  ---
+node_modules/
+.wrangler/
+
+# --- Archivos del sistema y de editores ---
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

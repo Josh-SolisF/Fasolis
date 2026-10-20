@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
-nodo.py - Pasos 1 y 2 de FaroNet: nodo con paquetes de tamano fijo y enrutamiento.
+nodo.py - Pasos 1 a 3 de FaroNet: nodo con enrutamiento y directorio firmado.
 
 Cada maquina (laptop o Raspberry) corre una copia de este programa. El nodo:
   - escucha conexiones de otros nodos en un puerto TCP,
   - se conecta a los vecinos que se le pasan por terminal (reintentando),
   - intercambia un saludo para saber el nombre de cada vecino,
   - aprende rutas hacia nodos lejanos con un vector de distancias (tipo RIP),
-  - reenvia los paquetes que no son para el hacia el vecino mas cercano al destino.
+  - reenvia los paquetes que no son para el hacia el vecino mas cercano al destino,
+  - si se le indica un directorio, publica alli su ficha firmada cada minuto.
 
-Uso, en cuatro terminales de la misma laptop (cadena A - B - C - D):
-  python3 nodo.py --nombre A --puerto 9001
-  python3 nodo.py --nombre B --puerto 9002 --vecino 127.0.0.1:9001
-  python3 nodo.py --nombre C --puerto 9003 --vecino 127.0.0.1:9002
-  python3 nodo.py --nombre D --puerto 9004 --vecino 127.0.0.1:9003
+Uso, en cinco terminales de la misma laptop (directorio + cadena A - B - C - D):
+  python3 directorio.py --puerto 9000
+  python3 nodo.py --nombre A --puerto 9001 --directorio 127.0.0.1:9000
+  python3 nodo.py --nombre B --puerto 9002 --vecino 127.0.0.1:9001 --directorio 127.0.0.1:9000
+  python3 nodo.py --nombre C --puerto 9003 --vecino 127.0.0.1:9002 --directorio 127.0.0.1:9000
+  python3 nodo.py --nombre D --puerto 9004 --vecino 127.0.0.1:9003 --directorio 127.0.0.1:9000
 
 En Windows se usa "py" en lugar de "python3", y conviene agregar
 --escuchar 127.0.0.1 para que el firewall no pregunte en pruebas locales.
@@ -21,84 +23,63 @@ En Windows se usa "py" en lugar de "python3", y conviene agregar
 Comandos en la terminal:
   <destino> <mensaje>   envia un mensaje a cualquier nodo con ruta conocida
   rutas                 muestra la tabla de rutas
+  directorio            consulta el directorio y verifica las firmas
   vecinos               muestra los vecinos directos
   salir                 termina el nodo
 
-Privacidad: no se imprimen ni se guardan direcciones IP; nada se escribe a
-disco. El paquete de datos lleva el destino pero NO el origen: quien recibe
+Privacidad: no se imprimen ni se guardan direcciones IP. Lo unico que se
+escribe a disco son las llaves del nodo (ver identidad.py). El paquete de datos lleva el destino pero NO el origen: quien recibe
 un mensaje no sabe de que nodo salio. Ocultar tambien el destino a los nodos
 intermedios es tarea del enrutamiento por capas (paso siguiente).
 """
+from __future__ import annotations
+
 import argparse
 import asyncio
-import os
-import struct
+import random
 import sys
 import threading
 import time
 from dataclasses import dataclass
 
+from directorio import consultar, publicar_ficha
+from identidad import Ficha, Identidad
+from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_DATOS, TIPO_HOLA,
+                     TIPO_RUTAS, PaqueteInvalido, armar, desarmar)
+
 # ---------------------------------------------------------------------------
-# Formato del paquete de la mesh (version 1)
-#
-#   0        1        2                 6        8                     512
-#   +--------+--------+-----------------+--------+---------------------+
-#   |Version |  Tipo  |   Id circuito   |Longitud| Contenido + relleno |
-#   +--------+--------+-----------------+--------+---------------------+
-#
-# Todos los paquetes miden TAM_PAQUETE bytes. "Longitud" indica cuantos bytes
-# del contenido son reales; el resto es relleno aleatorio. Como el tamano es
-# fijo, sobre TCP basta con leer exactamente TAM_PAQUETE bytes por paquete.
-#
-# Contenido segun el tipo:
-#   HOLA   nombre del nodo que saluda
+# El formato base del paquete (512 bytes, encabezado y relleno) esta en
+# paquete.py. Contenido segun el tipo:
+#   HOLA   Bandera(1) | Nombre      (bandera 1 = "aun no te escucho, contestame")
 #   DATOS  TTL(1) | LongDestino(1) | Destino | Mensaje
 #   RUTAS  repeticion de: LongNombre(1) | Nombre | Distancia(1)
 # ---------------------------------------------------------------------------
-VERSION = 1
-TAM_PAQUETE = 512
-ENCABEZADO = struct.Struct("!BBIH")  # version, tipo, circuito, longitud
-MAX_CONTENIDO = TAM_PAQUETE - ENCABEZADO.size
-
-TIPO_HOLA = 1   # saludo inicial
-TIPO_DATOS = 2  # mensaje enrutado hacia un destino
-TIPO_RUTAS = 3  # anuncio del vector de distancias
-
-MAX_NOMBRE = 16           # caracteres por nombre de nodo
 INFINITO = 16             # distancia que significa "inalcanzable" (como en RIP)
 TTL_INICIAL = 16          # saltos maximos de un paquete de datos
-INTERVALO_ANUNCIO = 5.0   # segundos entre anuncios periodicos de rutas
-VIDA_RUTA = 3 * INTERVALO_ANUNCIO  # sin noticias en este tiempo, la ruta muere
-
-
-class PaqueteInvalido(Exception):
-    """El paquete recibido no respeta el formato o la version."""
-
-
-# ------------------------------------------------------------ paquete basico
-def armar(tipo: int, contenido: bytes, circuito: int = 0) -> bytes:
-    """Construye un paquete de TAM_PAQUETE bytes con relleno aleatorio."""
-    if len(contenido) > MAX_CONTENIDO:
-        raise ValueError(f"contenido de {len(contenido)} bytes; maximo {MAX_CONTENIDO}")
-    encabezado = ENCABEZADO.pack(VERSION, tipo, circuito, len(contenido))
-    relleno = os.urandom(MAX_CONTENIDO - len(contenido))
-    return encabezado + contenido + relleno
-
-
-def desarmar(paquete: bytes) -> tuple[int, int, bytes]:
-    """Valida un paquete y devuelve (tipo, circuito, contenido sin relleno)."""
-    if len(paquete) != TAM_PAQUETE:
-        raise PaqueteInvalido("tamano incorrecto")
-    version, tipo, circuito, longitud = ENCABEZADO.unpack_from(paquete)
-    if version != VERSION:
-        raise PaqueteInvalido(f"version {version} no soportada")
-    if longitud > MAX_CONTENIDO:
-        raise PaqueteInvalido("longitud fuera de rango")
-    inicio = ENCABEZADO.size
-    return tipo, circuito, paquete[inicio:inicio + longitud]
+INTERVALO_ANUNCIO = 5.0   # segundos entre anuncios de rutas (--intervalo-rutas)
+REENVIO_HOLA = 5.0        # si el vecino no saluda, repetir el saludo cada tanto
+HOLA_PIDE_RESPUESTA = 1   # saludo de quien todavia no escucha al otro
+HOLA_RESPUESTA = 0        # saludo de respuesta: no se contesta (evita ping-pong)
+INTERVALO_PUBLICACION = 60.0  # segundos entre publicaciones de la ficha
+REINTENTO_PUBLICACION = 5.0   # si el directorio no responde, reintentar antes
 
 
 # ------------------------------------------------------------- datos y rutas
+def armar_hola(nombre: str, pide_respuesta: bool) -> bytes:
+    bandera = HOLA_PIDE_RESPUESTA if pide_respuesta else HOLA_RESPUESTA
+    return armar(TIPO_HOLA, bytes([bandera]) + nombre.encode())
+
+
+def leer_hola(contenido: bytes) -> tuple[bool, str]:
+    """Devuelve (pide_respuesta, nombre del vecino)."""
+    if len(contenido) < 2:
+        raise PaqueteInvalido("saludo vacio")
+    nombre = contenido[1:].decode(errors="replace")
+    if not 0 < len(contenido) - 1 <= MAX_NOMBRE:
+        raise PaqueteInvalido("nombre de vecino invalido")
+    return contenido[0] == HOLA_PIDE_RESPUESTA, nombre
+
+
 def armar_datos(destino: str, mensaje: bytes, ttl: int = TTL_INICIAL) -> bytes:
     nombre = destino.encode()
     contenido = bytes([ttl, len(nombre)]) + nombre + mensaje
@@ -149,11 +130,20 @@ class Ruta:
 
 # --------------------------------------------------------------------- nodo
 class Nodo:
-    def __init__(self, nombre: str, debug: bool = False):
-        self.nombre = nombre
+    def __init__(self, identidad: Identidad, directorio: tuple[str, int] | None = None,
+                 debug: bool = False, intervalo: float = INTERVALO_ANUNCIO):
+        self.identidad = identidad
+        self.nombre = identidad.nombre
+        self.directorio = directorio
         self.debug = debug
+        self.intervalo = intervalo        # segundos entre anuncios de rutas
+        self.vida_ruta = 3 * intervalo    # sin noticias en este tiempo, la ruta muere
+        self.detener = asyncio.Event()    # otro componente (p. ej. el boton de panico) pide salir
+        # Comandos de terminal que agregan otros programas: nombre -> (ayuda, funcion)
+        self.comandos: dict[str, tuple[str, object]] = {}
         self.vecinos: dict[str, asyncio.StreamWriter] = {}
         self.tabla: dict[str, Ruta] = {}
+        self.conocidos: dict[str, Ficha] = {}  # fichas verificadas del directorio
 
     def log(self, texto: str):
         """Mensajes de depuracion: solo a la terminal y solo con --debug."""
@@ -162,17 +152,40 @@ class Nodo:
 
     # -- conexiones ---------------------------------------------------------
     async def atender(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        """Maneja una conexion (entrante o saliente) durante toda su vida."""
+        """
+        Maneja una conexion durante toda su vida. Sirve igual para TCP y para
+        el Faro (enlace_faro.py imita un reader/writer de asyncio).
+
+        Saludo: se envia un HOLA que pide respuesta y se repite cada
+        'reenvio_hola' segundos hasta recibir el HOLA del vecino. En TCP nunca
+        se pierde, pero por luz si: si el otro Faro arranco despues, nuestro
+        primer saludo se perdio y el suyo nos llega cuando ya estamos
+        conectados; por eso un HOLA que pide respuesta siempre se contesta.
+        """
         vecino = None
+        reenvio = getattr(writer, "reenvio_hola", REENVIO_HOLA)
         try:
-            writer.write(armar(TIPO_HOLA, self.nombre.encode()))
+            writer.write(armar_hola(self.nombre, True))
             await writer.drain()
-            tipo, _, contenido = desarmar(await reader.readexactly(TAM_PAQUETE))
-            if tipo != TIPO_HOLA:
-                raise PaqueteInvalido("se esperaba un saludo")
-            vecino = contenido.decode(errors="replace")
-            if vecino == self.nombre or not 0 < len(vecino) <= MAX_NOMBRE:
-                raise PaqueteInvalido("nombre de vecino invalido")
+            while vecino is None:
+                try:
+                    # Variacion aleatoria: dos nodos que arrancan juntos no deben
+                    # repetir el saludo siempre al mismo tiempo (por luz chocarian).
+                    paquete = await asyncio.wait_for(reader.readexactly(TAM_PAQUETE),
+                                                     reenvio * random.uniform(0.7, 1.3))
+                except asyncio.TimeoutError:
+                    writer.write(armar_hola(self.nombre, True))
+                    await writer.drain()
+                    continue
+                tipo, _, contenido = desarmar(paquete)
+                if tipo != TIPO_HOLA:
+                    continue  # trafico previo al saludo: se ignora
+                pide_respuesta, vecino = leer_hola(contenido)
+                if vecino == self.nombre:
+                    raise PaqueteInvalido("el vecino usa el mismo nombre que este nodo")
+                if pide_respuesta:
+                    writer.write(armar_hola(self.nombre, False))
+                    await writer.drain()
             self.vecinos[vecino] = writer
             print(f"[{self.nombre}] conectado con {vecino}")
             await self.vecino_conectado(vecino)
@@ -184,6 +197,10 @@ class Nodo:
                         await self.recibir_datos(contenido)
                     elif tipo == TIPO_RUTAS:
                         await self.recibir_rutas(vecino, decodificar_rutas(contenido))
+                    elif tipo == TIPO_HOLA and leer_hola(contenido)[0]:
+                        # El vecino no recibio nuestro saludo: se lo repetimos.
+                        writer.write(armar_hola(self.nombre, False))
+                        await writer.drain()
                 except PaqueteInvalido as error:
                     print(f"[{self.nombre}] paquete descartado: {error}")
         except (asyncio.IncompleteReadError, ConnectionError):
@@ -275,11 +292,11 @@ class Nodo:
     async def mantenimiento(self):
         """Anuncia periodicamente y envejece las rutas sin noticias."""
         while True:
-            await asyncio.sleep(INTERVALO_ANUNCIO)
+            await asyncio.sleep(self.intervalo)
             ahora = time.monotonic()
             for destino in list(self.tabla):
                 ruta = self.tabla[destino]
-                if ahora - ruta.actualizada > VIDA_RUTA:
+                if ahora - ruta.actualizada > self.vida_ruta:
                     if ruta.distancia < INFINITO:
                         ruta.distancia, ruta.actualizada = INFINITO, ahora
                         self.log(f"ruta a {destino} expiro")
@@ -318,6 +335,48 @@ class Nodo:
             return
         if not await self.entregar(ruta.siguiente, paquete):
             print(f"[{self.nombre}] fallo el envio hacia {destino}")
+
+    # -- directorio -------------------------------------------------------------
+    async def publicar_periodicamente(self):
+        """
+        Publica la ficha al arrancar y luego cada INTERVALO_PUBLICACION. Si el
+        directorio no responde (por ejemplo, aun no arranca), reintenta cada
+        REINTENTO_PUBLICACION segundos.
+        """
+        estado_anterior = None
+        while True:
+            try:
+                aceptada, texto = await publicar_ficha(self.directorio, self.identidad.ficha())
+                estado = "ok" if aceptada else f"rechazada: {texto}"
+            except (OSError, asyncio.TimeoutError, PaqueteInvalido, asyncio.IncompleteReadError):
+                estado = "sin conexion con el directorio"
+            if estado != estado_anterior:  # solo avisar cuando algo cambia
+                if estado == "ok":
+                    print(f"[{self.nombre}] ficha publicada en el directorio")
+                else:
+                    print(f"[{self.nombre}] ficha no publicada ({estado})")
+                estado_anterior = estado
+            sin_conexion = estado == "sin conexion con el directorio"
+            await asyncio.sleep(REINTENTO_PUBLICACION if sin_conexion else INTERVALO_PUBLICACION)
+
+    async def consultar_directorio(self):
+        if self.directorio is None:
+            print(f"[{self.nombre}] no se indico --directorio")
+            return
+        try:
+            fichas, descartadas = await consultar(self.directorio)
+        except (OSError, asyncio.TimeoutError, PaqueteInvalido, asyncio.IncompleteReadError):
+            print(f"[{self.nombre}] no se pudo consultar el directorio")
+            return
+        self.conocidos = {f.nombre: f for f in fichas}
+        print(f"[{self.nombre}] directorio: {len(fichas)} ficha(s) con firma valida")
+        ahora = time.time()
+        for f in sorted(fichas, key=lambda f: f.nombre):
+            marca = "  <- este nodo" if f.nombre == self.nombre else ""
+            print(f"    {f.nombre:<{MAX_NOMBRE}} huella {f.huella()}  "
+                  f"vence en {int(f.expira - ahora)} s{marca}")
+        if descartadas:
+            print(f"[{self.nombre}] ATENCION: {descartadas} ficha(s) con firma invalida descartadas")
 
     # -- terminal ---------------------------------------------------------------
     def mostrar_rutas(self):
@@ -363,11 +422,18 @@ class Nodo:
                 print(f"[{self.nombre}] vecinos: {', '.join(sorted(self.vecinos)) or 'ninguno'}")
             elif linea == "rutas":
                 self.mostrar_rutas()
+            elif linea == "directorio":
+                await self.consultar_directorio()
+            elif linea in self.comandos:
+                resultado = self.comandos[linea][1]()
+                if asyncio.iscoroutine(resultado):
+                    await resultado
             elif " " in linea:
                 destino, texto = linea.split(" ", 1)
                 await self.enviar(destino, texto)
             elif linea:
-                print("uso: <destino> <mensaje> | rutas | vecinos | salir")
+                extra = "".join(f" | {c}" for c in self.comandos)
+                print(f"uso: <destino> <mensaje> | rutas | directorio | vecinos{extra} | salir")
 
 
 # ------------------------------------------------------------------- arranque
@@ -385,22 +451,36 @@ def nombre_valido(texto: str) -> str:
     return texto
 
 
-async def principal(args):
-    nodo = Nodo(args.nombre, debug=args.debug)
+async def principal(args, identidad: Identidad, preparar=None) -> "Nodo":
+    """
+    Arranca el nodo y espera hasta "salir", fin de la entrada o nodo.detener.
+    'preparar(nodo)' permite que otro programa (faro_nodo.py) agregue tareas
+    propias, como el enlace por luz o el boton de panico.
+    """
+    nodo = Nodo(identidad, args.directorio, debug=args.debug, intervalo=args.intervalo_rutas)
     servidor = await asyncio.start_server(nodo.atender, args.escuchar, args.puerto)
-    print(f"[{nodo.nombre}] escuchando en el puerto {args.puerto}")
+    print(f"[{nodo.nombre}] escuchando en el puerto {args.puerto}, "
+          f"huella {identidad.ficha().huella()}")
     tareas = [asyncio.create_task(nodo.conectar(h, p)) for h, p in args.vecino]
     tareas.append(asyncio.create_task(nodo.mantenimiento()))
+    if args.directorio is not None:
+        tareas.append(asyncio.create_task(nodo.publicar_periodicamente()))
+    if preparar is not None:
+        tareas += preparar(nodo)
+    terminal = asyncio.create_task(nodo.leer_terminal())
+    fin = asyncio.create_task(nodo.detener.wait())
     try:
-        await nodo.leer_terminal()
+        await asyncio.wait({terminal, fin}, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        for tarea in tareas:
+        for tarea in tareas + [terminal, fin]:
             tarea.cancel()
         servidor.close()
+    return nodo
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Nodo de FaroNet (pasos 1 y 2)")
+def crear_parser(descripcion: str = "Nodo de FaroNet") -> argparse.ArgumentParser:
+    """Argumentos del nodo; faro_nodo.py los reutiliza y agrega los del Faro."""
+    parser = argparse.ArgumentParser(description=descripcion)
     parser.add_argument("--nombre", required=True, type=nombre_valido,
                         help="nombre de este nodo, p. ej. A")
     parser.add_argument("--puerto", type=int, required=True, help="puerto TCP donde escuchar")
@@ -408,11 +488,29 @@ def main():
                         help="interfaz donde escuchar (0.0.0.0 = toda la red local)")
     parser.add_argument("--vecino", type=direccion, action="append", default=[],
                         help="vecino al que conectarse, host:puerto (se puede repetir)")
+    parser.add_argument("--directorio", type=direccion, default=None,
+                        help="directorio donde publicar la ficha, host:puerto")
+    parser.add_argument("--llaves", default=None,
+                        help="archivo de llaves (por defecto ~/.faronet/<nombre>.llaves)")
+    parser.add_argument("--intervalo-rutas", type=float, default=INTERVALO_ANUNCIO,
+                        help=f"segundos entre anuncios de rutas (por defecto {INTERVALO_ANUNCIO:g}); "
+                             "por luz conviene uno mayor")
     parser.add_argument("--debug", action="store_true",
                         help="mostrar en la terminal los cambios de rutas y los reenvios")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = crear_parser("Nodo de FaroNet (pasos 1 a 3)").parse_args()
+    # Las llaves se cargan aparte, para que un error de archivo no se
+    # confunda con un error del puerto.
     try:
-        asyncio.run(principal(args))
+        identidad = Identidad.cargar_o_crear(args.nombre, args.llaves)
+    except OSError as error:
+        print(f"no se pudo leer ni crear el archivo de llaves: {error}")
+        sys.exit(1)
+    try:
+        asyncio.run(principal(args, identidad))
     except KeyboardInterrupt:
         pass  # Ctrl+C termina limpio, sin traza de error
     except OSError as error:
