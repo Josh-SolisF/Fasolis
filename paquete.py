@@ -28,6 +28,8 @@ MAX_NOMBRE = 16  # bytes por nombre de nodo
 TIPO_HOLA = 1    # saludo inicial: nombre del nodo
 TIPO_DATOS = 2   # mensaje enrutado hacia un destino
 TIPO_RUTAS = 3   # anuncio del vector de distancias
+TIPO_CEBOLLA = 4  # celda de la cebolla, enrutada hacia el siguiente relay
+TIPO_MENSAJE = 5  # mensaje sellado (extremo a extremo) que sale del ultimo relay
 
 # Tipos del directorio (entre un nodo y el servicio de directorio)
 TIPO_DIR_PUBLICAR = 10   # nodo -> directorio: una ficha firmada

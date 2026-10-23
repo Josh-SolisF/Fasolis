@@ -22,6 +22,9 @@ En Windows se usa "py" en lugar de "python3", y conviene agregar
 
 Comandos en la terminal:
   <destino> <mensaje>   envia un mensaje a cualquier nodo con ruta conocida
+  anonimo <destino> <mensaje>
+                        lo envia por 3 relays con cifrado por capas (cebolla.py);
+                        necesita --directorio y al menos 5 nodos en la mesh
   rutas                 muestra la tabla de rutas
   directorio            consulta el directorio y verifica las firmas
   vecinos               muestra los vecinos directos
@@ -30,7 +33,7 @@ Comandos en la terminal:
 Privacidad: no se imprimen ni se guardan direcciones IP. Lo unico que se
 escribe a disco son las llaves del nodo (ver identidad.py). El paquete de datos lleva el destino pero NO el origen: quien recibe
 un mensaje no sabe de que nodo salio. Ocultar tambien el destino a los nodos
-intermedios es tarea del enrutamiento por capas (paso siguiente).
+intermedios lo hace el enrutamiento por capas (cebolla.py, comando 'anonimo').
 """
 from __future__ import annotations
 
@@ -42,10 +45,11 @@ import threading
 import time
 from dataclasses import dataclass
 
+from cebolla import Cebolla, CebollaError
 from directorio import consultar, publicar_ficha
 from identidad import Ficha, Identidad
-from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_DATOS, TIPO_HOLA,
-                     TIPO_RUTAS, PaqueteInvalido, armar, desarmar)
+from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_CEBOLLA, TIPO_DATOS,
+                     TIPO_HOLA, TIPO_MENSAJE, TIPO_RUTAS, PaqueteInvalido, armar, desarmar)
 
 # ---------------------------------------------------------------------------
 # El formato base del paquete (512 bytes, encabezado y relleno) esta en
@@ -53,6 +57,10 @@ from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_DATOS, TIPO_HO
 #   HOLA   Bandera(1) | Nombre      (bandera 1 = "aun no te escucho, contestame")
 #   DATOS  TTL(1) | LongDestino(1) | Destino | Mensaje
 #   RUTAS  repeticion de: LongNombre(1) | Nombre | Distancia(1)
+#   CEBOLLA y MENSAJE (enrutados, ver cebolla.py):
+#          TTL(1) | Destino(16, relleno de ceros) | Carga
+#          A diferencia de DATOS, el destino mide siempre 16 bytes y la carga
+#          siempre lo mismo, para que el largo del paquete no filtre nada.
 # ---------------------------------------------------------------------------
 INFINITO = 16             # distancia que significa "inalcanzable" (como en RIP)
 TTL_INICIAL = 16          # saltos maximos de un paquete de datos
@@ -94,6 +102,24 @@ def leer_datos(contenido: bytes) -> tuple[int, str, bytes]:
     if n == 0 or n > MAX_NOMBRE or len(contenido) < 2 + n:
         raise PaqueteInvalido("destino invalido")
     return ttl, contenido[2:2 + n].decode(errors="replace"), contenido[2 + n:]
+
+
+def armar_enrutado(tipo: int, destino: str, carga: bytes, ttl: int = TTL_INICIAL) -> bytes:
+    """Paquete enrutado hacia 'destino' (CEBOLLA o MENSAJE), con destino de largo fijo."""
+    nombre = destino.encode()
+    if not 0 < len(nombre) <= MAX_NOMBRE:
+        raise PaqueteInvalido("destino invalido")
+    return armar(tipo, bytes([ttl]) + nombre.ljust(MAX_NOMBRE, b"\0") + carga)
+
+
+def leer_enrutado(contenido: bytes) -> tuple[int, str, bytes]:
+    """Devuelve (ttl, destino, carga) de un paquete CEBOLLA o MENSAJE."""
+    if len(contenido) < 1 + MAX_NOMBRE:
+        raise PaqueteInvalido("paquete enrutado sin encabezado")
+    destino = contenido[1:1 + MAX_NOMBRE].rstrip(b"\0").decode(errors="replace")
+    if not destino:
+        raise PaqueteInvalido("destino vacio")
+    return contenido[0], destino, contenido[1 + MAX_NOMBRE:]
 
 
 def codificar_rutas(entradas: list[tuple[str, int]]) -> bytes:
@@ -144,6 +170,7 @@ class Nodo:
         self.vecinos: dict[str, asyncio.StreamWriter] = {}
         self.tabla: dict[str, Ruta] = {}
         self.conocidos: dict[str, Ficha] = {}  # fichas verificadas del directorio
+        self.cebolla = Cebolla(self)           # relay y emisor anonimo (cebolla.py)
 
     def log(self, texto: str):
         """Mensajes de depuracion: solo a la terminal y solo con --debug."""
@@ -197,6 +224,8 @@ class Nodo:
                         await self.recibir_datos(contenido)
                     elif tipo == TIPO_RUTAS:
                         await self.recibir_rutas(vecino, decodificar_rutas(contenido))
+                    elif tipo in (TIPO_CEBOLLA, TIPO_MENSAJE):
+                        await self.recibir_enrutado(tipo, contenido)
                     elif tipo == TIPO_HOLA and leer_hola(contenido)[0]:
                         # El vecino no recibio nuestro saludo: se lo repetimos.
                         writer.write(armar_hola(self.nombre, False))
@@ -320,6 +349,41 @@ class Nodo:
         self.log(f"reenviando paquete hacia {destino} via {ruta.siguiente}")
         await self.entregar(ruta.siguiente, armar_datos(destino, mensaje, ttl - 1))
 
+    def ruta_a(self, destino: str) -> Ruta | None:
+        """La ruta vigente hacia un nodo, o None si no hay."""
+        ruta = self.tabla.get(destino)
+        return ruta if ruta is not None and ruta.distancia < INFINITO else None
+
+    async def enviar_enrutado(self, tipo: int, destino: str, carga: bytes, ttl: int = TTL_INICIAL):
+        """
+        Manda una carga hacia 'destino' por la mesh. Si el destino es este mismo
+        nodo, se procesa aqui. Si no hay ruta, se descarta en silencio.
+        """
+        if destino == self.nombre:
+            await self.cebolla.recibir(tipo, carga)
+            return
+        ruta = self.ruta_a(destino)
+        if ruta is None:
+            self.log(f"paquete hacia {destino} descartado: sin ruta")
+            return
+        await self.entregar(ruta.siguiente, armar_enrutado(tipo, destino, carga, ttl))
+
+    async def recibir_enrutado(self, tipo: int, contenido: bytes):
+        """Un paquete CEBOLLA o MENSAJE: es para este nodo o hay que reenviarlo."""
+        ttl, destino, carga = leer_enrutado(contenido)
+        if destino == self.nombre:
+            await self.cebolla.recibir(tipo, carga)
+        elif ttl <= 1:
+            self.log(f"paquete hacia {destino} descartado: TTL agotado")
+        else:
+            await self.enviar_enrutado(tipo, destino, carga, ttl - 1)
+
+    async def enviar_anonimo(self, destino: str, texto: str):
+        try:
+            await self.cebolla.enviar_anonimo(destino, texto)
+        except (CebollaError, PaqueteInvalido) as error:
+            print(f"[{self.nombre}] no se envio: {error}")
+
     async def enviar(self, destino: str, texto: str):
         if destino == self.nombre:
             print(f"[{self.nombre}] ese es este mismo nodo")
@@ -424,6 +488,12 @@ class Nodo:
                 self.mostrar_rutas()
             elif linea == "directorio":
                 await self.consultar_directorio()
+            elif linea.startswith("anonimo "):
+                partes = linea.split(" ", 2)
+                if len(partes) == 3:
+                    await self.enviar_anonimo(partes[1], partes[2])
+                else:
+                    print("uso: anonimo <destino> <mensaje>")
             elif linea in self.comandos:
                 resultado = self.comandos[linea][1]()
                 if asyncio.iscoroutine(resultado):
@@ -433,7 +503,7 @@ class Nodo:
                 await self.enviar(destino, texto)
             elif linea:
                 extra = "".join(f" | {c}" for c in self.comandos)
-                print(f"uso: <destino> <mensaje> | rutas | directorio | vecinos{extra} | salir")
+                print(f"uso: <destino> <mensaje> | anonimo <destino> <mensaje> | rutas | directorio | vecinos{extra} | salir")
 
 
 # ------------------------------------------------------------------- arranque
