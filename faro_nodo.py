@@ -111,6 +111,7 @@ def main() -> int:
         enlace.detener()
         if panico.is_set():
             print(f"[{args.nombre}] BOTON DE PANICO: borrando estado sensible...")
+            identidad.olvidar()  # las llaves de cifrado viejas se descartan ya
             del identidad  # se sueltan las llaves en memoria; el proceso termina enseguida
             resultado = ejecutar_panico([ruta_llaves], indicadores)
             print(f"[{args.nombre}] llaves borradas: {len(resultado['llaves_borradas'])} archivo(s); "

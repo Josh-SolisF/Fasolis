@@ -24,9 +24,17 @@ Comandos en la terminal:
   <destino> <mensaje>   envia un mensaje a cualquier nodo con ruta conocida
   anonimo <destino> <mensaje>
                         lo envia por 3 relays con cifrado por capas (cebolla.py);
-                        necesita --directorio y al menos 5 nodos en la mesh
+                        necesita --directorio y al menos 5 nodos en la mesh;
+                        el destinatario no sabe quien lo envio
+  firmado <destino> <mensaje>
+                        igual, pero el destinatario (solo el) ve y verifica tu
+                        nombre y puede contestar con otro 'firmado'
+  publico <gateway> <tema> <mensaje>
+                        mensaje PUBLICO anonimo: lo recibe el nodo <gateway>, que
+                        lo publica en clearnet; es el unico tipo que sale de FaroNet
   rutas                 muestra la tabla de rutas
   directorio            consulta el directorio y verifica las firmas
+  rotarllaves           cambia ya la llave de cifrado (tambien rota sola, ver --rotar-llaves)
   vecinos               muestra los vecinos directos
   salir                 termina el nodo
 
@@ -47,7 +55,7 @@ from dataclasses import dataclass
 
 from cebolla import Cebolla, CebollaError
 from directorio import consultar, publicar_ficha
-from identidad import Ficha, Identidad
+from identidad import GRACIA_LLAVE, Ficha, Identidad
 from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_CEBOLLA, TIPO_DATOS,
                      TIPO_HOLA, TIPO_MENSAJE, TIPO_RUTAS, PaqueteInvalido, armar, desarmar)
 
@@ -171,6 +179,7 @@ class Nodo:
         self.tabla: dict[str, Ruta] = {}
         self.conocidos: dict[str, Ficha] = {}  # fichas verificadas del directorio
         self.cebolla = Cebolla(self)           # relay y emisor anonimo (cebolla.py)
+        self.republicar = asyncio.Event()      # pide publicar la ficha ya (p. ej. tras rotar llaves)
 
     def log(self, texto: str):
         """Mensajes de depuracion: solo a la terminal y solo con --debug."""
@@ -378,9 +387,10 @@ class Nodo:
         else:
             await self.enviar_enrutado(tipo, destino, carga, ttl - 1)
 
-    async def enviar_anonimo(self, destino: str, texto: str):
+    async def enviar_anonimo(self, destino: str, texto: str, firmado: bool = False,
+                             tema: str | None = None):
         try:
-            await self.cebolla.enviar_anonimo(destino, texto)
+            await self.cebolla.enviar_anonimo(destino, texto, firmado, tema)
         except (CebollaError, PaqueteInvalido) as error:
             print(f"[{self.nombre}] no se envio: {error}")
 
@@ -399,6 +409,18 @@ class Nodo:
             return
         if not await self.entregar(ruta.siguiente, paquete):
             print(f"[{self.nombre}] fallo el envio hacia {destino}")
+
+    # -- llaves -----------------------------------------------------------------
+    def rotar_llaves(self):
+        """Cambia la llave de cifrado y publica ya la ficha nueva (la vieja queda en gracia)."""
+        self.identidad.rotar()
+        self.republicar.set()
+        self.log("llave de cifrado rotada")
+
+    async def rotar_llaves_periodicamente(self, cada: float):
+        while True:
+            await asyncio.sleep(cada)
+            self.rotar_llaves()
 
     # -- directorio -------------------------------------------------------------
     async def publicar_periodicamente(self):
@@ -421,7 +443,12 @@ class Nodo:
                     print(f"[{self.nombre}] ficha no publicada ({estado})")
                 estado_anterior = estado
             sin_conexion = estado == "sin conexion con el directorio"
-            await asyncio.sleep(REINTENTO_PUBLICACION if sin_conexion else INTERVALO_PUBLICACION)
+            espera = REINTENTO_PUBLICACION if sin_conexion else INTERVALO_PUBLICACION
+            try:  # duerme, pero se despierta si se rota la llave y hay que publicar la nueva
+                await asyncio.wait_for(self.republicar.wait(), espera)
+            except asyncio.TimeoutError:
+                pass
+            self.republicar.clear()
 
     async def consultar_directorio(self):
         if self.directorio is None:
@@ -488,12 +515,21 @@ class Nodo:
                 self.mostrar_rutas()
             elif linea == "directorio":
                 await self.consultar_directorio()
-            elif linea.startswith("anonimo "):
+            elif linea == "rotarllaves":
+                self.rotar_llaves()
+                print(f"[{self.nombre}] llave de cifrado rotada; la anterior se olvida en {GRACIA_LLAVE} s")
+            elif linea.startswith(("anonimo ", "firmado ")):
                 partes = linea.split(" ", 2)
                 if len(partes) == 3:
-                    await self.enviar_anonimo(partes[1], partes[2])
+                    await self.enviar_anonimo(partes[1], partes[2], firmado=partes[0] == "firmado")
                 else:
-                    print("uso: anonimo <destino> <mensaje>")
+                    print(f"uso: {partes[0]} <destino> <mensaje>")
+            elif linea.startswith("publico "):
+                partes = linea.split(" ", 3)
+                if len(partes) == 4:
+                    await self.enviar_anonimo(partes[1], partes[3], tema=partes[2])
+                else:
+                    print("uso: publico <gateway> <tema> <mensaje>")
             elif linea in self.comandos:
                 resultado = self.comandos[linea][1]()
                 if asyncio.iscoroutine(resultado):
@@ -503,7 +539,7 @@ class Nodo:
                 await self.enviar(destino, texto)
             elif linea:
                 extra = "".join(f" | {c}" for c in self.comandos)
-                print(f"uso: <destino> <mensaje> | anonimo <destino> <mensaje> | rutas | directorio | vecinos{extra} | salir")
+                print(f"uso: <destino> <mensaje> | anonimo <destino> <mensaje> | firmado <destino> <mensaje> | publico <gateway> <tema> <mensaje> | rotarllaves | rutas | directorio | vecinos{extra} | salir")
 
 
 # ------------------------------------------------------------------- arranque
@@ -535,6 +571,8 @@ async def principal(args, identidad: Identidad, preparar=None) -> "Nodo":
     tareas.append(asyncio.create_task(nodo.mantenimiento()))
     if args.directorio is not None:
         tareas.append(asyncio.create_task(nodo.publicar_periodicamente()))
+    if getattr(args, "rotar_llaves", 0) > 0:
+        tareas.append(asyncio.create_task(nodo.rotar_llaves_periodicamente(args.rotar_llaves)))
     if preparar is not None:
         tareas += preparar(nodo)
     terminal = asyncio.create_task(nodo.leer_terminal())
@@ -565,6 +603,9 @@ def crear_parser(descripcion: str = "Nodo de FaroNet") -> argparse.ArgumentParse
     parser.add_argument("--intervalo-rutas", type=float, default=INTERVALO_ANUNCIO,
                         help=f"segundos entre anuncios de rutas (por defecto {INTERVALO_ANUNCIO:g}); "
                              "por luz conviene uno mayor")
+    parser.add_argument("--rotar-llaves", type=float, default=3600.0,
+                        help="segundos entre rotaciones de la llave de cifrado "
+                             "(por defecto 3600; 0 = no rotar sola)")
     parser.add_argument("--debug", action="store_true",
                         help="mostrar en la terminal los cambios de rutas y los reenvios")
     return parser

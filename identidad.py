@@ -5,9 +5,17 @@ Cada nodo tiene dos pares de llaves (PyNaCl):
   - firma   (Ed25519):  demuestra que una ficha la publico ese nodo.
   - cifrado (X25519):   permite que otros le manden datos que solo el lee.
 
-Las llaves privadas se guardan en ~/.faronet/<nombre>.llaves (64 bytes:
-semilla de firma + llave de cifrado). Ese archivo es el estado sensible que
-el boton de panico debe borrar. No debe subirse nunca al repositorio.
+La llave de FIRMA (larga vida) se guarda en ~/.faronet/<nombre>.llaves (32 bytes,
+la semilla; un archivo viejo de 64 bytes tambien se lee). Ese archivo es el
+estado sensible que el boton de panico debe borrar. No debe subirse nunca al
+repositorio.
+
+La llave de CIFRADO nunca se escribe a disco: vive en memoria y ROTA. Al rotar,
+la anterior se conserva solo GRACIA_LLAVE segundos (para celdas ya en camino y
+fichas que otros tienen en cache) y luego se olvida. Asi, quien robe el nodo
+mas tarde no puede descifrar trafico capturado antes de la rotacion (secreto
+hacia adelante). Python no permite borrar la memoria de forma garantizada: se
+sueltan las referencias, y es lo mejor que se puede hacer aqui.
 
 Formato de una ficha (version 1, big-endian):
   Version(1) | LongNombre(1) | Nombre | LlaveFirma(32) | LlaveCifrado(32) |
@@ -31,6 +39,7 @@ from paquete import MAX_NOMBRE
 
 VERSION_FICHA = 1
 VIDA_FICHA = 300        # segundos de validez de una ficha recien firmada
+GRACIA_LLAVE = 600      # segundos que se acepta una llave de cifrado ya rotada
 MAX_VIDA_FICHA = 3600   # el directorio rechaza vencimientos mas lejanos
 TAM_LLAVE = 32
 TAM_FIRMA = 64
@@ -99,7 +108,33 @@ class Identidad:
     def __init__(self, nombre: str, firma: SigningKey, cifrado: PrivateKey):
         self.nombre = nombre
         self.firma = firma
-        self.cifrado = cifrado
+        self._actual = cifrado
+        self._anteriores: list[tuple[PrivateKey, float]] = []   # (llave, vence en monotonic)
+
+    @property
+    def cifrado(self) -> PrivateKey:
+        """La llave de cifrado vigente: la que se publica en la ficha y se usa para enviar."""
+        return self._actual
+
+    def _purgar(self):
+        ahora = time.monotonic()
+        self._anteriores = [(k, v) for k, v in self._anteriores if v > ahora]
+
+    def llaves_cifrado(self) -> list[PrivateKey]:
+        """Todas las llaves con las que aun se acepta trafico: la vigente primero."""
+        self._purgar()
+        return [self._actual] + [k for k, _ in self._anteriores]
+
+    def rotar(self, gracia: float = GRACIA_LLAVE):
+        """Genera una llave de cifrado nueva; la vieja se acepta 'gracia' segundos mas."""
+        self._purgar()
+        self._anteriores.append((self._actual, time.monotonic() + gracia))
+        self._actual = PrivateKey.generate()
+
+    def olvidar(self):
+        """Descarta ya mismo todas las llaves de cifrado viejas (boton de panico)."""
+        self._anteriores.clear()
+        self._actual = PrivateKey.generate()   # la vigente tambien se suelta
 
     @staticmethod
     def ruta_por_defecto(nombre: str) -> str:
@@ -107,27 +142,30 @@ class Identidad:
 
     @classmethod
     def cargar_o_crear(cls, nombre: str, ruta: str | None = None) -> "Identidad":
-        """Lee las llaves del archivo; si no existe o esta danado, crea unas nuevas."""
+        """
+        Lee la llave de firma del archivo; si no existe o esta danado, crea una nueva.
+        La llave de cifrado siempre es nueva en cada arranque (no se guarda).
+        """
         ruta = ruta or cls.ruta_por_defecto(nombre)
         try:
             with open(ruta, "rb") as f:
                 datos = f.read()
-            if len(datos) == 2 * TAM_LLAVE:
-                return cls(nombre, SigningKey(datos[:TAM_LLAVE]), PrivateKey(datos[TAM_LLAVE:]))
+            if len(datos) in (TAM_LLAVE, 2 * TAM_LLAVE):
+                return cls(nombre, SigningKey(datos[:TAM_LLAVE]), PrivateKey.generate())
         except OSError:
             pass
-        firma, cifrado = SigningKey.generate(), PrivateKey.generate()
+        firma = SigningKey.generate()
         # abspath: si la ruta no trae carpeta ("impostor.llaves"), es la actual.
         os.makedirs(os.path.dirname(os.path.abspath(ruta)), exist_ok=True)
         # 0o600: solo el dueno puede leerlo (en Windows se ignora el modo).
         fd = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
-            f.write(bytes(firma) + bytes(cifrado))
-        return cls(nombre, firma, cifrado)
+            f.write(bytes(firma))
+        return cls(nombre, firma, PrivateKey.generate())
 
     def ficha(self, vida: int = VIDA_FICHA) -> Ficha:
         """Crea y firma una ficha nueva con vencimiento dentro de 'vida' segundos."""
         f = Ficha(self.nombre, bytes(self.firma.verify_key),
-                  bytes(self.cifrado.public_key), int(time.time()) + vida)
+                  bytes(self._actual.public_key), int(time.time()) + vida)
         f.firma = self.firma.sign(f.cuerpo()).signature
         return f
