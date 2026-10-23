@@ -162,7 +162,7 @@ class PuertoConIndicadores:
 def abrir_faro(ruta: str = "/dev/serial0", baudios: int = 1200, direccion=None,
                indicadores: Indicadores | None = None, **kw):
     """DispositivoLuzAdaptador.abrir() con los LEDs conectados al puerto."""
-    from capa1 import DispositivoLuzAdaptador
+    from faronet.faro.capa1 import DispositivoLuzAdaptador
     adaptador = DispositivoLuzAdaptador.abrir(ruta, baudios, direccion=direccion, **kw)
     if indicadores is not None and indicadores.disponible:
         adaptador.puerto = PuertoConIndicadores(adaptador.puerto, indicadores, adaptador.t_byte)
@@ -207,7 +207,7 @@ def ejecutar_panico(archivos_llaves: list[str], indicadores: Indicadores | None 
     El estado en memoria (tablas de rutas, fichas, llaves cargadas) se pierde
     al terminar el proceso, que es lo que hace faro_nodo.py a continuacion.
     """
-    from capa1 import direccion_persistente
+    from faronet.faro.capa1 import direccion_persistente
     borrados = [r for r in archivos_llaves if borrar_archivo_seguro(r)]
     nueva = direccion_persistente(rotar=True)
     if indicadores is not None:

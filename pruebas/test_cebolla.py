@@ -1,4 +1,4 @@
-"""
+﻿"""
 pruebas_cebolla.py - Pruebas de la cebolla.   Ejecutar:  python3 pruebas_cebolla.py -v
 
 Usan una "mesh" falsa en memoria: cada nodo falso entrega los paquetes
@@ -12,11 +12,13 @@ import os
 import tempfile
 import unittest
 
-import cebolla
-from cebolla import (MAX_MENSAJE, MAX_MENSAJE_FIRMADO, MAX_PUBLICO, SALTOS, TAM_BLOQUE, TAM_CUERPO, TAM_SALTO, TAM_SELLADO,
+from faronet.mesh import cebolla
+
+
+from faronet.mesh.cebolla import (MAX_MENSAJE, MAX_MENSAJE_FIRMADO, MAX_PUBLICO, SALTOS, TAM_BLOQUE, TAM_CUERPO, TAM_SALTO, TAM_SELLADO,
                      Cebolla, CebollaError, construir_celda)
-from identidad import Identidad
-from paquete import TIPO_CEBOLLA, TIPO_MENSAJE
+from faronet.mesh.identidad import Identidad
+from faronet.mesh.paquete import TIPO_CEBOLLA, TIPO_MENSAJE
 
 
 class Red:

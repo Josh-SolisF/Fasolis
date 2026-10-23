@@ -26,8 +26,8 @@ import random
 import sys
 import time
 
-from capa1 import direccion_persistente
-from hardware import Indicadores, abrir_faro
+from faronet.faro.capa1 import direccion_persistente
+from faronet.faro.hardware import Indicadores, abrir_faro
 
 MARCA = b"\x7E\x81\xC3\x3C\x5A\xA5"  # inicio de la fase de BER crudo
 SEMILLA = 2026

@@ -95,9 +95,9 @@ from nacl.hash import blake2b
 from nacl.public import Box, PrivateKey, PublicKey, SealedBox
 from nacl.secret import SecretBox
 
-from directorio import consultar
-from identidad import Ficha, Identidad
-from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TIPO_CEBOLLA, TIPO_MENSAJE, PaqueteInvalido)
+from faronet.mesh.directorio import consultar
+from faronet.mesh.identidad import Ficha, Identidad
+from faronet.mesh.paquete import (MAX_CONTENIDO, MAX_NOMBRE, TIPO_CEBOLLA, TIPO_MENSAJE, PaqueteInvalido)
 
 # ------------------------------------------------------------- constantes
 VERSION_CEBOLLA = 1

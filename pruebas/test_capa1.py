@@ -11,7 +11,7 @@ import random
 import threading
 import unittest
 
-from capa1 import (DIFUSION, MAX_DATOS, TAM_MAX_TRAMA, TIPO_DATOS, TIPO_EXTERNA,
+from faronet.faro.capa1 import (DIFUSION, MAX_DATOS, TAM_MAX_TRAMA, TIPO_DATOS, TIPO_EXTERNA,
                    Decodificador, DispositivoLuzAdaptador, Trama, codificar)
 
 

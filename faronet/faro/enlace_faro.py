@@ -31,9 +31,9 @@ import threading
 import time
 from collections import deque
 
-from capa1 import (DIFUSION, MAX_DATOS, TAM_ACK, TAM_MAX_TRAMA, TIPO_DATOS, Trama,
+from faronet.faro.capa1 import (DIFUSION, MAX_DATOS, TAM_ACK, TAM_MAX_TRAMA, TIPO_DATOS, Trama,
                    direccion_persistente)
-from paquete import TAM_PAQUETE, TIPO_RUTAS, VERSION
+from faronet.mesh.paquete import TAM_PAQUETE, TIPO_RUTAS, VERSION
 
 ESCUCHA = 0.2           # segundos escuchando antes de revisar la cola de salida
 REINTENTOS_PAQUETE = 3  # intentos completos por paquete (cada uno ya reintenta por fragmento)

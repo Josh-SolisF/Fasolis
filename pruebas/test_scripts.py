@@ -1,4 +1,4 @@
-"""
+﻿"""
 pruebas_scripts.py - Prueba enviar.py y recibir.py de punta a punta.
 
 Se les inyecta un adaptador sobre puertos virtuales en vez de abrir
@@ -12,10 +12,10 @@ import tempfile
 import threading
 import unittest
 
-import enviar
-import recibir
-from capa1 import DispositivoLuzAdaptador
-from pruebas_capa1 import PuertoVirtual
+from faronet.herramientas import enviar
+from faronet.herramientas import recibir
+from faronet.faro.capa1 import DispositivoLuzAdaptador
+from pruebas.test_capa1 import PuertoVirtual
 
 A, B = 0xABCD, 0x1234
 

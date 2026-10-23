@@ -16,8 +16,8 @@ el timeout sin recibir nada, 2 si hubo error de uso.
 import argparse
 import sys
 
-from capa1 import (TIPO_EXTERNA, DispositivoLuzAdaptador, direccion_persistente)
-from enviar import hexa
+from faronet.faro.capa1 import (TIPO_EXTERNA, DispositivoLuzAdaptador, direccion_persistente)
+from faronet.herramientas.enviar import hexa
 
 
 def leer_argumentos(argv):

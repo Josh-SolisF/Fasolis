@@ -53,10 +53,10 @@ import threading
 import time
 from dataclasses import dataclass
 
-from cebolla import Cebolla, CebollaError
-from directorio import consultar, publicar_ficha
-from identidad import GRACIA_LLAVE, Ficha, Identidad
-from paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_CEBOLLA, TIPO_DATOS,
+from faronet.mesh.cebolla import Cebolla, CebollaError
+from faronet.mesh.directorio import consultar, publicar_ficha
+from faronet.mesh.identidad import GRACIA_LLAVE, Ficha, Identidad
+from faronet.mesh.paquete import (MAX_CONTENIDO, MAX_NOMBRE, TAM_PAQUETE, TIPO_CEBOLLA, TIPO_DATOS,
                      TIPO_HOLA, TIPO_MENSAJE, TIPO_RUTAS, PaqueteInvalido, armar, desarmar)
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ Codigo de salida: 0 si el mensaje fue confirmado, 1 si no, 2 si hubo error de us
 import argparse
 import sys
 
-from capa1 import (DIFUSION, MAX_DATOS, TIPO_DATOS, TIPO_EXTERNA, DispositivoLuzAdaptador,
+from faronet.faro.capa1 import (DIFUSION, MAX_DATOS, TIPO_DATOS, TIPO_EXTERNA, DispositivoLuzAdaptador,
                    Trama, direccion_persistente)
 
 

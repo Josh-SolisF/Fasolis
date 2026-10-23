@@ -35,7 +35,7 @@ from nacl.hash import blake2b
 from nacl.public import PrivateKey
 from nacl.signing import SigningKey, VerifyKey
 
-from paquete import MAX_NOMBRE
+from faronet.mesh.paquete import MAX_NOMBRE
 
 VERSION_FICHA = 1
 VIDA_FICHA = 300        # segundos de validez de una ficha recien firmada

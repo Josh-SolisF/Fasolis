@@ -27,8 +27,8 @@ import sys
 import threading
 import time
 
-from identidad import Ficha, FichaInvalida
-from paquete import (MAX_NOMBRE, RESPUESTA_ERROR, RESPUESTA_OK, TIPO_DIR_CONSULTAR,
+from faronet.mesh.identidad import Ficha, FichaInvalida
+from faronet.mesh.paquete import (MAX_NOMBRE, RESPUESTA_ERROR, RESPUESTA_OK, TIPO_DIR_CONSULTAR,
                      TIPO_DIR_FICHA, TIPO_DIR_FIN, TIPO_DIR_PUBLICAR, TIPO_DIR_RESPUESTA,
                      PaqueteInvalido, armar, leer_paquete)
 

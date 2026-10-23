@@ -24,11 +24,11 @@ import asyncio
 import sys
 import threading
 
-from capa1 import direccion_persistente
-from enlace_faro import EnlaceFaro, mantener_enlace
-from hardware import Indicadores, abrir_faro, ejecutar_panico
-from identidad import Identidad
-from nodo import crear_parser, principal
+from faronet.faro.capa1 import direccion_persistente
+from faronet.faro.enlace_faro import EnlaceFaro, mantener_enlace
+from faronet.faro.hardware import Indicadores, abrir_faro, ejecutar_panico
+from faronet.mesh.identidad import Identidad
+from faronet.mesh.nodo import crear_parser, principal
 
 
 def hexa(valor: str) -> int:
