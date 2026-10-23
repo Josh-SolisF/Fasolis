@@ -1,0 +1,17 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "faronet",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-19",
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["Sala"] }
+	],
+	"durable_objects": {
+		"bindings": [{ "name": "SALA", "class_name": "Sala" }]
+	},
+	// Llave PUBLICA del gateway (hex). Local: va en edge/.dev.vars. Producción: pegarla aquí.
+	"vars": { "GATEWAY_PUBKEY": "" },
+	// Privacidad: sin logs de invocaciones (traen metadatos de las peticiones).
+	"observability": { "enabled": false },
+	"upload_source_maps": true
+}
