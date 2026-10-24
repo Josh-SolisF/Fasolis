@@ -4,11 +4,14 @@
 interface __BaseEnv_Env {
 	GATEWAY_PUBKEY: "";
 	SALA: DurableObjectNamespace<import("./src/index").Sala>;
+	CONTROL: DurableObjectNamespace<import("./src/index").Control>;
+	BUZON: DurableObjectNamespace<import("./src/index").Buzon>;
+	DIRECTORIO: DurableObjectNamespace<import("./src/index").Directorio>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "Sala";
+		durableNamespaces: "Sala" | "Control" | "Buzon" | "Directorio";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

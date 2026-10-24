@@ -1,13 +1,16 @@
 """
 gateway.py - Cliente del Worker (edge) para el gateway de FaroNet.
 
-Por ahora solo firma y publica mensajes (para probar el Worker). El enganche
-con la cebolla (al_recibir_publico) viene en el siguiente paso.
+Firma y manda al Worker (edge/) las dos cosas que solo el gateway puede mandar:
+  - mensajes publicos para una sala             POST /gateway/publicar
+  - fichas del directorio de FaroNet (replica)  POST /gateway/directorio
+El enganche con la cebolla (recibir mensajes publicos de la mesh y llamar a
+publicar) esta en gateway_nodo.py.
 
 La llave de firma del gateway es PROPIA (no la del nodo): ~/.faronet/gateway.llave
 
 Uso (desde la raiz del repositorio):
-    py -m faronet.herramientas.gateway --mostrar-llave
+    py -m faronet.herramientas.gateway --mostrar-llave   # esta llave va en GATEWAY_PUBKEY (edge/wrangler.jsonc)
     py -m faronet.herramientas.gateway --edge http://localhost:8787 --probar general "hola"
     py -m faronet.herramientas.gateway --edge https://faronet.USUARIO.workers.dev --probar general "hola"
 """
@@ -25,6 +28,8 @@ from nacl.signing import SigningKey
 
 RUTA_LLAVE = Path.home() / ".faronet" / "gateway.llave"
 RUTA_PUBLICAR = "/gateway/publicar"
+RUTA_DIRECTORIO = "/gateway/directorio"
+MAX_FICHAS_POR_ENVIO = 64   # igual que edge/src/index.ts
 
 
 def cargar_llave(ruta: Path = RUTA_LLAVE) -> SigningKey:
@@ -47,23 +52,52 @@ def firmar(llave: SigningKey, metodo: str, ruta: str, ts: int, cuerpo: bytes) ->
     return llave.sign(mensaje).signature.hex()
 
 
-def publicar(edge: str, llave: SigningKey, tema: str, texto: str) -> int:
-    """Publica un mensaje en la sala 'tema'. Devuelve el codigo HTTP."""
-    cuerpo = json.dumps({"tema": tema, "texto": texto}, ensure_ascii=False).encode()
+def _enviar(edge: str, llave: SigningKey, ruta: str, cuerpo: bytes) -> tuple[int, bytes]:
+    """
+    POST firmado al Worker. Devuelve (codigo HTTP, cuerpo de la respuesta);
+    codigo 0 si no hubo conexion. La firma cubre metodo, ruta, marca de tiempo
+    y hash del cuerpo, y el Worker rechaza repeticiones.
+    """
     ts = int(time.time())
     peticion = urllib.request.Request(
-        edge.rstrip("/") + RUTA_PUBLICAR, data=cuerpo, method="POST",
+        edge.rstrip("/") + ruta, data=cuerpo, method="POST",
         headers={
             "Content-Type": "application/json",
             "User-Agent": "faronet-gateway/1",
             "X-Faro-Ts": str(ts),
-            "X-Faro-Firma": firmar(llave, "POST", RUTA_PUBLICAR, ts, cuerpo),
+            "X-Faro-Firma": firmar(llave, "POST", ruta, ts, cuerpo),
         })
     try:
         with urllib.request.urlopen(peticion, timeout=10) as respuesta:
-            return respuesta.status
+            return respuesta.status, respuesta.read()
     except urllib.error.HTTPError as error:
-        return error.code
+        return error.code, error.read()
+    except (urllib.error.URLError, OSError):
+        return 0, b""
+
+
+def publicar(edge: str, llave: SigningKey, tema: str, texto: str) -> int:
+    """Publica un mensaje en la sala 'tema'. Devuelve el codigo HTTP (204 = ok, 0 = sin conexion)."""
+    cuerpo = json.dumps({"tema": tema, "texto": texto}, ensure_ascii=False).encode()
+    return _enviar(edge, llave, RUTA_PUBLICAR, cuerpo)[0]
+
+
+def publicar_fichas(edge: str, llave: SigningKey, fichas_hex: list[str]) -> tuple[int, dict]:
+    """
+    Manda fichas del directorio (hex de Ficha.codificar()) a la replica publica.
+    El Worker verifica la firma de cada una. Devuelve (codigo, {"aceptadas": n, "rechazadas": [...]}).
+    """
+    resultado = {"aceptadas": 0, "rechazadas": []}
+    codigo = 200
+    for i in range(0, len(fichas_hex), MAX_FICHAS_POR_ENVIO):
+        cuerpo = json.dumps({"fichas": fichas_hex[i:i + MAX_FICHAS_POR_ENVIO]}).encode()
+        codigo, respuesta = _enviar(edge, llave, RUTA_DIRECTORIO, cuerpo)
+        if codigo != 200:
+            return codigo, resultado
+        datos = json.loads(respuesta)
+        resultado["aceptadas"] += datos["aceptadas"]
+        resultado["rechazadas"] += datos["rechazadas"]
+    return codigo, resultado
 
 
 def main():
@@ -82,7 +116,7 @@ def main():
         if not args.edge:
             p.error("--probar necesita --edge")
         codigo = publicar(args.edge, llave, *args.probar)
-        print(f"respuesta del Worker: HTTP {codigo}")
+        print(f"respuesta del Worker: HTTP {codigo}" + (" (sin conexion)" if codigo == 0 else ""))
         sys.exit(0 if codigo == 204 else 1)
     p.print_help()
 

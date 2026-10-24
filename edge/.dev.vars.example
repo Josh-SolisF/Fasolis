@@ -1,0 +1,5 @@
+# Copiar a .dev.vars (NO se sube al repositorio) y pegar la llave PUBLICA del gateway:
+#   py -m faronet.herramientas.gateway --mostrar-llave
+GATEWAY_PUBKEY=
+# Opcional: sal propia para el limitador de peticiones
+# LIMITE_SAL=

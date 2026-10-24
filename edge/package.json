@@ -6,11 +6,16 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "start": "wrangler dev",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "probar": "tsx --require ./pruebas/registro.cjs --test pruebas/edge.test.ts",
+    "tipos": "tsc -p tsconfig.check.json",
+    "humo": "node pruebas/humo.mjs",
+    "humo:falso": "tsx --require ./pruebas/registro.cjs pruebas/servidor-falso.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "typescript": "^5.5.2",
-    "wrangler": "^4.152.0"
+    "wrangler": "^4.152.0",
+    "tsx": "^4.19.0"
   }
 }
