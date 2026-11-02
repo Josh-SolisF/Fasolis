@@ -1,0 +1,25 @@
+RECUPERAR LA LLAVE DEL GATEWAY (despues del boton de panico en Soli)
+=====================================================================
+
+1. Abrir PowerShell en la carpeta del repositorio (FaSolis) y pegar ESTA linea:
+
+powershell -ExecutionPolicy Bypass -File .\scripts\reinstalar_llave_gateway.ps1
+
+   Debe terminar mostrando: 91678aa4d9343a172f235294960feb86e07fdf3a63a2210440274aeef3ebec24
+   (si muestra otra cosa, la llave no es la autorizada por el Worker).
+
+   Alternativa sin el script (misma accion, en una sola linea):
+
+ssh soliberrypi@192.168.40.165 "mkdir -p ~/.faronet && chmod 700 ~/.faronet"; scp "$env:USERPROFILE\.faronet\gateway.llave" soliberrypi@192.168.40.165:~/.faronet/gateway.llave; ssh soliberrypi@192.168.40.165 "chmod 600 ~/.faronet/gateway.llave && cd ~/Fasolis && python3 -m faronet.herramientas.gateway --mostrar-llave"
+
+2. Comprobar que el Worker la acepta (debe decir HTTP 204):
+
+ssh soliberrypi@192.168.40.165 "cd ~/Fasolis && python3 -m faronet.herramientas.gateway --edge https://faronet.fasolis.workers.dev --probar general prueba"
+
+3. Volver a arrancar el gateway en Soli (en su terminal, ajustando --vecino y --directorio a la mesh del momento):
+
+python3 -m faronet.herramientas.gateway_nodo --nombre GW --puerto 9110 --vecino 127.0.0.1:9102 --directorio 192.168.40.164:9000 --edge https://faronet.fasolis.workers.dev
+
+Si la llave pudo haber sido copiada por alguien: NO reinstalarla. Generar una nueva
+(py -m faronet.herramientas.gateway --mostrar-llave, despues de renombrar la vieja),
+poner la llave publica en GATEWAY_PUBKEY (edge/wrangler.jsonc) y redesplegar con npx wrangler deploy.

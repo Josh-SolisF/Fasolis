@@ -1,10 +1,30 @@
 # FaroNet (Fasolis)
 
 Proyecto 1 de Redes de Computadoras (TEC): una red mesh anónima que viaja por luz infrarroja
-(el **Faro**) y por TCP/IP, con salida controlada a Internet por el edge.
+(el **Faro**) y por TCP/IP, con salida controlada a Internet por el edge
+(un Worker de Cloudflare, en `edge/`).
 
 Este README es el **mapa del repositorio**: qué hace cada archivo y cómo se conectan.
 El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`docs/Kickoff.md`](docs/Kickoff.md).
+
+## Documentación
+
+| Documento | Contenido |
+|---|---|
+| [`docs/RFC-FaroNet.txt`](docs/RFC-FaroNet.txt) | **RFC** en ASCII de la Capa 1 (Faro) y de FaroNet: tramas, acceso al medio, mesh, cebolla, gateway y edge, manejo de versiones, Consideraciones de Privacidad y de Seguridad, vectores de prueba. |
+| [`docs/DOCUMENTACION_PRUEBAS.md`](docs/DOCUMENTACION_PRUEBAS.md) | **Documentación del proyecto**: introducción, ambiente de desarrollo, diseño (Faro, BOM, multímetro, modelo de amenazas), estructuras de datos y funciones, instrucciones de ejecución, actividades por estudiante, autoevaluación, lecciones aprendidas, bibliografía y, en el Anexo A, los resultados de las pruebas. |
+| [`docs/BITACORA_MULTIMETRO.md`](docs/BITACORA_MULTIMETRO.md) | **Bitácora de pruebas con multímetro** de los dos Faros: continuidad, ausencia de cortos, resistencias y voltajes en 9 puntos de la perfboard. |
+| `Prototipado.fzz.zip` | **Esquemático** del Faro en Fritzing. |
+
+### Resultados principales
+
+| Prueba | Resultado |
+|---|---|
+| Pruebas automáticas | 84/84 Python en las dos Raspberry Pi · 38/38 del Worker |
+| Enlace por luz (BER 0 en 40 000 bits por sentido, con ACK; 100 cm en cuarto a oscuras, el resto con luz ambiente) | 7,5 cm: 3000 bd (~1762 bit/s) · 15 cm y 30 cm: 3600 bd (~2105 bit/s) · 65 cm: 2700 bd (~1590 bit/s) · 100 cm: 1800 bd (~1065 bit/s) |
+| Mesh con cebolla (3 relays) | Wi-Fi: 0,31 s por mensaje anónimo · por la luz a 1800 bd: 9–22 s |
+| Edge | Worker en `https://faronet.fasolis.workers.dev`: un mensaje público llega de la mesh a la sala en ~1 s; firmas del gateway (401/409), rate limit 120/min, buzón, feed y directorio |
+| Costo de los dos Faros | ₡28 722,90 según las facturas (detalle en la documentación, sección 3.6) |
 
 ---
 
@@ -13,8 +33,9 @@ El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`d
 ```
 FaSolis/
 ├── README.md                    este mapa
-├── requirements.txt             dependencias de Python
 ├── .gitignore
+├── requirements.txt             dependencias de Python
+├── Prototipado.fzz.zip          esquemático del Faro (Fritzing)
 │
 ├── faronet/                     todo el código Python
 │   ├── faro/                    Capa 1 y hardware (la luz)
@@ -31,19 +52,33 @@ FaSolis/
 │       ├── enviar.py
 │       ├── recibir.py
 │       ├── medir_enlace.py
-│       └── faro_nodo.py
+│       ├── faro_nodo.py
+│       ├── gateway.py           cliente firmado del Worker
+│       ├── gateway_nodo.py      nodo gateway: mesh -> edge
+│       └── buzon.py             cliente del buzón muerto
 │
-├── pruebas/                     pruebas automáticas (unittest)
+├── edge/                        Worker de Cloudflare (TypeScript), ver edge/README.md
+│   ├── src/                     index, auth, control, sala, feed, buzon, directorio
+│   ├── pruebas/                 pruebas del Worker y prueba de humo
+│   ├── wrangler.jsonc           configuración y despliegue
+│   └── package.json
+│
+├── pruebas/                     pruebas automáticas de Python (unittest)
 │   ├── test_capa1.py
 │   ├── test_cebolla.py
+│   ├── test_gateway.py
 │   └── test_scripts.py
 │
 ├── scripts/
 │   └── probar_cebolla.ps1       levanta directorio + 6 nodos en Windows
 │
 └── docs/
-    ├── Kickoff.md               documento de kick-off
-    └── DiagramaModelo.png       diagrama de arquitectura y hardware
+    ├── Kickoff.md                   documento de kick-off
+    ├── RFC-FaroNet.txt              RFC (ASCII) de la Capa 1 y de FaroNet
+    ├── DOCUMENTACION_PRUEBAS.md     documentación técnica, BOM y bitácora de pruebas
+    ├── BITACORA_MULTIMETRO.md       plantilla de la bitácora del multímetro
+    ├── DiagramaModelo.png           diagrama de arquitectura y hardware
+    └── explicación del proyecto.pdf guía de estudio de todo el proyecto
 ```
 
 Cómo se apilan los módulos (cada uno solo importa de los de abajo):
@@ -54,6 +89,10 @@ faro_nodo ─┬─ nodo ── cebolla ── directorio ── identidad ─�
            └─ hardware ─┐
 enviar / recibir /      ├─ capa1
 medir_enlace ───────────┘
+
+gateway_nodo ─┬─ nodo (igual que arriba)
+              └─ gateway ── HTTPS firmado ──> edge (Worker de Cloudflare)
+buzon ───────────────────── HTTPS ──────────> edge
 ```
 
 ---
@@ -84,6 +123,28 @@ medir_enlace ───────────┘
 | `recibir.py` | Espera mensajes por el Faro (esclavo); texto por stdout, estado por stderr. |
 | `medir_enlace.py` | Mide **BER** y **tasa efectiva** a una distancia dada (se corre en las dos Pi a la vez). Imprime una línea `RESULTADO;...` para la tabla del informe. |
 | `faro_nodo.py` | Nodo completo para la Raspberry Pi: el mismo `nodo.py` más el otro Faro como vecino, LEDs y botón de pánico (borra llaves, rota la dirección física). Comandos extra: `faro`, `rotar`. |
+| `gateway.py` | **Cliente del Worker.** Crea o lee la llave de firma propia del gateway (`~/.faronet/gateway.llave`) y firma las peticiones como espera `edge/src/auth.ts` (Ed25519 sobre método, ruta, marca de tiempo y SHA-256 del cuerpo). Publica mensajes en una sala y manda fichas del directorio en grupos de 64. `--mostrar-llave` imprime la llave pública que va en `GATEWAY_PUBKEY`; `--probar TEMA TEXTO` publica un mensaje de prueba. |
+| `gateway_nodo.py` | **Nodo gateway.** El mismo `nodo.py` conectado al hook `al_recibir_publico`: cada mensaje público que llega por la cebolla se publica en la sala de su tema en el Worker (reintenta si recibe 409). Cada `--sync-directorio` segundos (60 por defecto) envía las fichas del directorio de la mesh a la réplica pública del edge. No guarda nada a disco. |
+| `buzon.py` | **Cliente del buzón muerto.** Del secreto compartido deriva el id opaco y la llave; deposita y recoge blobs cifrados de exactamente 1024 bytes (hasta 982 bytes de texto). El Worker borra el blob al entregarlo. |
+
+## `edge/` — Worker de Cloudflare
+
+La capa de aplicación pública (clearnet), en TypeScript sobre Cloudflare Workers (plan gratuito).
+Solo recibe los mensajes marcados como públicos; los privados nunca llegan aquí. Los detalles
+(rutas, decisiones de diseño, qué sigue viendo Cloudflare y cómo desplegar) están en
+[`edge/README.md`](edge/README.md).
+
+| Archivo | Qué hace |
+|---|---|
+| `src/index.ts` | **Router del Worker.** Rutas del gateway (`POST /gateway/publicar`, `POST /gateway/directorio`), páginas HTML (`/`, `/sala/:tema`) con CSP y nonce por petición, WebSocket, historial y feed de cada sala, directorio público y buzón. Aplica límite de tamaño y de peticiones a todo. |
+| `src/auth.ts` | Verifica la firma Ed25519 del gateway con una ventana de 60 s. |
+| `src/control.ts` | Durable Object `Control` (solo en memoria): rate limiting por hash diario de la IP y anti-repetición de firmas (409). |
+| `src/sala.ts` | Durable Object `Sala`, uno por tema: guarda solo `(ts, texto)` en SQLite (24 h, máx. 200), reenvía en vivo por WebSockets hibernables de solo lectura y borra lo vencido con una alarma. |
+| `src/feed.ts` | Feed Atom de un tema, con XML escapado y autor siempre "anónimo". |
+| `src/buzon.ts` | Durable Object `Buzon`: blobs cifrados de 1024 bytes, TTL de 24 h, se borran al recogerlos (`DELETE ... RETURNING`, atómico). |
+| `src/directorio.ts` | Durable Object `Directorio`: réplica pública de solo lectura; verifica la firma de cada ficha, así que el gateway puede omitir fichas pero no inventarlas ni alterarlas. |
+| `wrangler.jsonc` | Configuración (equivale al `wrangler.toml` del enunciado): migraciones y bindings de los Durable Objects, `GATEWAY_PUBKEY` y `observability` apagada (sin registros). |
+| `pruebas/` | `edge.test.ts` (38 pruebas en Node con un entorno falso, sin wrangler ni red) y `humo.mjs` (prueba de humo contra un Worker corriendo, incluye WebSockets). |
 
 ## `pruebas/`
 
@@ -91,17 +152,20 @@ medir_enlace ───────────┘
 |---|---|
 | `test_capa1.py` | Trama, CRC, recuperación ante basura y cortes, y el adaptador, con puertos virtuales (`PuertoVirtual`); no necesita hardware. |
 | `test_cebolla.py` | Lógica criptográfica de la cebolla sobre una mesh falsa en memoria. Requiere `pynacl`. |
+| `test_gateway.py` | Que la firma del gateway coincida con la que verifica el Worker, el envío de fichas en grupos de 64 y el cliente del buzón (ida y vuelta, tamaño fijo, secreto equivocado). Usa un servidor falso, sin red. |
 | `test_scripts.py` | `enviar` y `recibir` de punta a punta sobre puertos virtuales. |
 
-Se corren todas con `py -m unittest discover -v` (74 pruebas).
+Se corren todas con `py -m unittest discover -v` (84 pruebas). Las del Worker (38) están en
+`edge/pruebas/` y se corren con `npm run probar` dentro de `edge/`.
 
 ## Otros archivos
 
 | Archivo | Qué hace |
 |---|---|
 | `scripts/probar_cebolla.ps1` | En Windows abre el directorio y 6 nodos encadenados (N1…N6) en `127.0.0.1`. |
-| `requirements.txt` | `pynacl` (mesh), y `pyserial` + `gpiozero` solo en la Pi. |
-| `.gitignore` | Evita subir llaves (`*.llaves`, `.faronet/`), `.env`, `.dev.vars`, `__pycache__`, `node_modules`, etc. |
+| `scripts/reinstalar_llave_gateway.ps1` | Después de usar el botón de pánico en el Faro gateway, vuelve a copiar la llave del gateway de la laptop a la Pi y muestra la llave pública para compararla con `GATEWAY_PUBKEY`. |
+| `requirements.txt` | Dependencias de Python: `pynacl` en todas las máquinas; `pyserial` y `gpiozero` solo en Linux / Raspberry Pi. |
+| `.gitignore` | Evita subir llaves (`*.llaves`, `.faronet/`), `.env`, `.dev.vars`, `__pycache__`, `node_modules`, `.wrangler/`, etc. |
 
 ---
 
@@ -110,7 +174,8 @@ Se corren todas con `py -m unittest discover -v` (74 pruebas).
 Todos los comandos se corren **desde la raíz del repositorio** con `-m` (en Linux/Raspberry, `python3` en lugar de `py`).
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt        # pynacl (todo) + pyserial y gpiozero (solo en Linux / Raspberry Pi)
+# En la Raspberry Pi: sudo apt install python3-nacl python3-serial python3-gpiozero python3-lgpio
 
 # Pruebas
 py -m unittest discover -v
@@ -129,17 +194,31 @@ python3 -m faronet.herramientas.recibir --una
 python3 -m faronet.herramientas.enviar 1234 --texto "Hola"
 python3 -m faronet.herramientas.medir_enlace receptor --baudios 2400 --distancia 50cm
 python3 -m faronet.herramientas.faro_nodo --nombre PA --puerto 9001 --baudios 2400
+
+# Edge (Worker de Cloudflare)
+py -m faronet.herramientas.gateway --mostrar-llave     # desde la raíz: va en GATEWAY_PUBKEY (edge/.dev.vars o wrangler.jsonc)
+cd edge
+npm install
+npm run probar                                         # 38 pruebas, sin wrangler ni red
+npx wrangler dev                                       # http://localhost:8787
+npx wrangler deploy                                    # despliegue real
+
+# Gateway y buzón (desde la raíz, con el Worker corriendo)
+py -m faronet.herramientas.gateway --edge http://localhost:8787 --probar general "hola"
+py -m faronet.herramientas.gateway_nodo --nombre GW --puerto 9010 --vecino 127.0.0.1:9006 --directorio 127.0.0.1:9000 --edge http://localhost:8787
+py -m faronet.herramientas.buzon --edge http://localhost:8787 depositar --secreto "<16+ caracteres al azar>" "hola"
+py -m faronet.herramientas.buzon --edge http://localhost:8787 recoger --secreto "<el mismo>"
 ```
+
+Desde otro nodo de la mesh, `publico GW general hola` manda un mensaje por la cebolla al gateway,
+que lo publica en `http://localhost:8787/sala/general` (y en `/sala/general/feed.atom`).
 
 Cada programa tiene `--help` y ejemplos más completos en su docstring.
 
 ---
 
-## Pendiente (según el enunciado)
+## Estado (según el enunciado)
 
-Todavía no está en el repositorio:
-
-- **Gateway** (Raspberry Pi): programa que use el hook `al_recibir_publico` y mantenga el WebSocket/HTTPS firmado con el Worker.
-- **Edge** (Cloudflare Workers, carpeta sugerida `edge/`): relay, salas públicas (Durable Objects), feeds Atom/RSS, buzón muerto, directorio público, rate limiting, política de no registro y `wrangler.toml`.
-- **RFC** en ASCII (Capa 1 y FaroNet, con Consideraciones de Privacidad y de Seguridad), sugerido en `docs/`.
-- **Documentación final**, esquemático, BOM, fotos del Faro soldado y bitácora de multímetro.
+Están completos el Faro soldado (Capa 1), la mesh con la cebolla, el gateway, el edge en Cloudflare, el RFC, la
+documentación con las mediciones por distancia, el BOM con costos, la bitácora de multímetro, el esquemático y las
+fotos de los dos Faros (todo en `docs/`).

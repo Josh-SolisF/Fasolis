@@ -3,14 +3,21 @@
 	"name": "faronet",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-10-19",
+	// Plan gratuito: los Durable Objects deben usar SQLite (new_sqlite_classes).
 	"migrations": [
-		{ "tag": "v1", "new_sqlite_classes": ["Sala"] }
+		{ "tag": "v1", "new_sqlite_classes": ["Sala"] },
+		{ "tag": "v2", "new_sqlite_classes": ["Control", "Buzon", "Directorio"] }
 	],
 	"durable_objects": {
-		"bindings": [{ "name": "SALA", "class_name": "Sala" }]
+		"bindings": [
+			{ "name": "SALA", "class_name": "Sala" },           // una sala por tema
+			{ "name": "CONTROL", "class_name": "Control" },     // rate limiting + anti-repeticion (memoria)
+			{ "name": "BUZON", "class_name": "Buzon" },         // buzon muerto
+			{ "name": "DIRECTORIO", "class_name": "Directorio" } // replica publica del directorio
+		]
 	},
 	// Llave PUBLICA del gateway (hex). Local: va en edge/.dev.vars. Producción: pegarla aquí.
-	"vars": { "GATEWAY_PUBKEY": "" },
+	"vars": { "GATEWAY_PUBKEY": "91678aa4d9343a172f235294960feb86e07fdf3a63a2210440274aeef3ebec24" },
 	// Privacidad: sin logs de invocaciones (traen metadatos de las peticiones).
 	"observability": { "enabled": false },
 	"upload_source_maps": true
