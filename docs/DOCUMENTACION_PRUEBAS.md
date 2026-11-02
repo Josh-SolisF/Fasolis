@@ -517,13 +517,13 @@ Las actividades de programación se hicieron en conjunto; sus fechas son las de 
 | 22/10/2026 | Cebolla: primera implementación y reorganización del código | 5 h | 5 h |
 | 23/10/2026 | Cebolla completa e inicio del Worker de Cloudflare | 5 h | 5 h |
 | 24/10/2026 | Worker completo y despliegue en Cloudflare | 6 h | 6 h |
-| 25/10/2026 | Corrección del diseño de la perfboard | 1 h | |
+| 25/10/2026 | Corrección del diseño de la perfboard | | 1 h |
 | 26/10/2026 | Actualización del README | 1 h | 1 h |
 | 27/10/2026 | Curso de soldadura | 2 h | 2 h |
 | 28/10/2026 | Soldadura del primer Faro | 6 h | 6 h |
 | 30/10/2026 | Soldadura del segundo Faro y pruebas de conexión | 10 h | 10 h |
 | 01/11/2026 | Pruebas de todo el sistema, mediciones por distancia, documentación y últimos detalles | 12 h | 12 h |
-| | **Total** | **88 h** | **74 h** |
+| | **Total** | **87 h** | **75 h** |
 
 ---
 
