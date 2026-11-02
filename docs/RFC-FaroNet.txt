@@ -139,7 +139,7 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
       11.4.  Gateway y Edge ......................................... 28
    12.  Referencias ................................................. 29
       12.1.  Referencias Normativas ................................. 29
-      12.2.  Referencias Informativas ............................... 29
+      12.2.  Referencias Informativas ............................... 30
    Apendice A.  Vectores de Prueba .................................. 30
       A.1.  CRC-16 .................................................. 30
       A.2.  Tramas .................................................. 30
@@ -1552,7 +1552,11 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
    publico.  El boton de panico le permite borrar su estado sensible y
    cambiar de direccion fisica en cualquier momento: el Faro sobrescribe
    con ceros y borra los archivos de llaves, olvida las llaves en
-   memoria, rota la direccion fisica y lo indica con los LEDs.
+   memoria, rota la direccion fisica y lo indica con los LEDs.  Si el
+   Faro es el gateway, ademas detiene el proceso del gateway y borra su
+   llave de firma, que es estado sensible: tras el panico el gateway no
+   puede publicar hasta que su operador reinstale la llave (o genere
+   una nueva y actualice GATEWAY_PUBKEY en el edge).
 
 10.8.  Mitigaciones Aplicadas
 
@@ -1584,16 +1588,15 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
       evita.  Los reintentos y la vuelta a la difusion solo recuperan
       fallas transitorias.
 
-   o  Un atacante puede responder a la difusion para que un Faro
-      "aprenda" una direccion falsa; el efecto es una denegacion de
-      servicio hasta el siguiente fallo, no una fuga de datos, porque
-
 
 Solis Fuentes & Solis Mora           Experimental            [Pagina 27]
 
 RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
 
 
+   o  Un atacante puede responder a la difusion para que un Faro
+      "aprenda" una direccion falsa; el efecto es una denegacion de
+      servicio hasta el siguiente fallo, no una fuga de datos, porque
       las celdas siguen cifradas.
 
 11.2.  Mesh y Directorio
@@ -1641,17 +1644,19 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
       directorio (solo con fichas validamente firmadas).  DEBE
       guardarse con permisos solo para el dueno y fuera del
       repositorio; solo la llave publica va en la configuracion del
-      despliegue.
-
-   o  La ventana de 60 s exige que el reloj del gateway este
-      sincronizado (por ejemplo con NTP).
-
+      despliegue.  El boton de panico del Faro gateway la borra (Seccion
+      10.7).  Si pudo haber sido copiada, DEBE generarse una nueva y
 
 
 Solis Fuentes & Solis Mora           Experimental            [Pagina 28]
 
 RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
 
+
+      actualizarse GATEWAY_PUBKEY antes de volver a publicar.
+
+   o  La ventana de 60 s exige que el reloj del gateway este
+      sincronizado (por ejemplo con NTP).
 
    o  El registro de firmas vistas y los contadores de limite viven en
       memoria: si la instancia se reinicia, se pierden.  Una peticion
@@ -1697,13 +1702,8 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
 
    [XSALSA20] Bernstein, D. J., "Extending the Salsa20 nonce", 2011.
 
-12.2.  Referencias Informativas
 
-   [RFC2453]  Malkin, G., "RIP Version 2", STD 56, RFC 2453, noviembre
-              1998.
 
-   [RFC4287]  Nottingham, M., Ed. y R. Sayre, Ed., "The Atom
-              Syndication Format", RFC 4287, diciembre 2005.
 
 
 
@@ -1711,6 +1711,14 @@ Solis Fuentes & Solis Mora           Experimental            [Pagina 29]
 
 RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
 
+
+12.2.  Referencias Informativas
+
+   [RFC2453]  Malkin, G., "RIP Version 2", STD 56, RFC 2453, noviembre
+              1998.
+
+   [RFC4287]  Nottingham, M., Ed. y R. Sayre, Ed., "The Atom
+              Syndication Format", RFC 4287, diciembre 2005.
 
    [RFC6455]  Fette, I. y A. Melnikov, "The WebSocket Protocol",
               RFC 6455, diciembre 2011.
@@ -1749,11 +1757,19 @@ A.2.  Tramas
 
 Apendice B.  Mediciones de la Implementacion de Referencia
 
-   Mediciones del 1 de noviembre de 2026 entre dos Raspberry Pi Model
-   B+ (ARMv6, 700 MHz) con Faros soldados, a 100 cm, en interior y con
-   luz ambiente normal, despues de ajustar el umbral de ambos
-   receptores.  La medicion a 3 distancias se reporta en la
-   documentacion del proyecto.
+   Mediciones entre dos Raspberry Pi Model B+ (ARMv6, 700 MHz) con
+   Faros soldados.  Las tablas de BER y tasa efectiva corresponden a
+   100 cm, en un cuarto a oscuras, sin otras fuentes de luz que
+   pudieran afectar la comunicacion.  Las demas distancias se midieron
+   en interior con luz ambiente normal.  El detalle completo esta en
+   la documentacion del proyecto.
+
+
+
+Solis Fuentes & Solis Mora           Experimental            [Pagina 30]
+
+RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
+
 
    BER (bytes sin trama):
 
@@ -1764,13 +1780,6 @@ Apendice B.  Mediciones de la Implementacion de Referencia
    | 1500    | 0 / 8000 bits           | 0 / 8000 bits           |
    | 1800    | 0 / 40000 (< 7,5e-5)    | 0 / 40000 (< 7,5e-5)    |
    | 2400    | 0 / 16000 bits          | 74 / 16000 (4,6e-3)     |
-
-
-Solis Fuentes & Solis Mora           Experimental            [Pagina 30]
-
-RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
-
-
    +---------+-------------------------+-------------------------+
 
    Tasa efectiva con el protocolo completo (1000 bytes, 9 tramas, ACK
@@ -1786,14 +1795,10 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
    +---------+-----------+----------------+-------------------------+
 
    La eficiencia es del 59 % de la velocidad del enlace.  La velocidad
-   maxima confiable a 100 cm fue 1800 baudios; la limita el receptor
-   que, con mas sensibilidad, empieza a ver el eco de su propio LED.
+   maxima confiable a 100 cm fue 1800 baudios.
 
-   A 65 cm, tras bajar la sensibilidad de ambos receptores (con la
-   calibracion de 100 cm se saturaban), el enlace funciono en ambos
-   sentidos hasta 2700 baudios: 0 errores en 40000 bits por sentido y
-   unos 1590 bit/s de carga util con el protocolo completo.  A 3000
-   baudios aparecieron errores (BER 3,75e-4) y se perdieron tramas.
+   El umbral del receptor se ajusto para 100 cm, 65 cm y 30 cm; las
+   mediciones de 15 cm y 7,5 cm usan el ajuste de 30 cm.
 
    +-----------+-------------------+----------------------------------+
    | Distancia | Velocidad maxima  | Carga util con ACK (ambos        |
@@ -1807,28 +1812,28 @@ RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
    +-----------+-------------------+----------------------------------+
 
    En todas las distancias el BER a la velocidad maxima fue 0 en 40000
-   bits por sentido (< 7,5e-5 al 95 %).  A 30 cm, sin recalibrar, el
-   receptor se saturaba y solo funcionaba 1200 baudios.
+   bits por sentido (< 7,5e-5 al 95 %).
    A 15 cm y 30 cm el maximo es el mismo: de cerca, el limite ya no es
    la cantidad de luz sino la velocidad de respuesta del
    fototransistor y del comparador.
-   A 7,5 cm, con la misma calibracion, el exceso de luz y el eco de la
-   placa de enfrente producen errores intermitentes a 3600 baudios.
+   A 7,5 cm el limite es el exceso de luz: a 3600 baudios el BER sube
+   a 1,7e-2 - 4,6e-2.
 
-   El umbral del comparador DEBERIA recalibrarse para cada distancia.
+   El umbral del comparador DEBERIA ajustarse segun la distancia.
 
    Con dos grupos de nodos unidos solo por los Faros a 1800 baudios,
    un paquete de 512 bytes cruza la luz en unos 4,2 s; un mensaje
-   directo de 5 saltos tardo 4,8 s y uno anonimo de 3 relays, entre
-   9,3 s y 21,7 s, segun cuantas veces la ruta cruza la luz.  Sobre
-   WiFi, un mensaje anonimo tardo 0,31 s.  En la Pi B+, firmar con
-   Ed25519 cuesta 2,1 ms y abrir un sellado, 3,5 ms.
 
 
 Solis Fuentes & Solis Mora           Experimental            [Pagina 31]
 
 RFC-FN 1         FaroNet v1: Faro y Mesh Anonima          Noviembre 2026
 
+
+   directo de 5 saltos tardo 4,8 s y uno anonimo de 3 relays, entre
+   9,3 s y 21,7 s, segun cuantas veces la ruta cruza la luz.  Sobre
+   WiFi, un mensaje anonimo tardo 0,31 s.  En la Pi B+, firmar con
+   Ed25519 cuesta 2,1 ms y abrir un sellado, 3,5 ms.
 
 Apendice C.  Correspondencia con la Implementacion
 
@@ -1860,11 +1865,6 @@ Direcciones de los Autores
    Instituto Tecnologico de Costa Rica
    Escuela de Ingenieria en Computacion
    Cartago, Costa Rica
-
-
-
-
-
 
 
 

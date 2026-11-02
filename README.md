@@ -12,8 +12,8 @@ El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`d
 | Documento | Contenido |
 |---|---|
 | [`docs/RFC-FaroNet.txt`](docs/RFC-FaroNet.txt) | **RFC** en ASCII de la Capa 1 (Faro) y de FaroNet: tramas, acceso al medio, mesh, cebolla, gateway y edge, manejo de versiones, Consideraciones de Privacidad y de Seguridad, vectores de prueba. |
-| [`docs/DOCUMENTACION_PRUEBAS.md`](docs/DOCUMENTACION_PRUEBAS.md) | Documentación técnica y **bitácora de pruebas**: hardware y **BOM con costos** (§3), código, pruebas automáticas, **BER y tasa efectiva por distancia** (§6), mesh y cebolla sobre Wi-Fi y sobre la luz (§7), gateway y Cloudflare (§8), comportamiento de las Raspberry Pi (§9), pendientes y trazabilidad con el enunciado. |
-| [`docs/BITACORA_MULTIMETRO.md`](docs/BITACORA_MULTIMETRO.md) | Plantilla de la **bitácora de pruebas con multímetro** (continuidad, cortos, resistencias y voltajes), con los puntos de la perfboard y los valores esperados. |
+| [`docs/DOCUMENTACION_PRUEBAS.md`](docs/DOCUMENTACION_PRUEBAS.md) | **Documentación del proyecto**: introducción, ambiente de desarrollo, diseño (Faro, BOM, multímetro, modelo de amenazas), estructuras de datos y funciones, instrucciones de ejecución, actividades por estudiante, autoevaluación, lecciones aprendidas, bibliografía y, en el Anexo A, los resultados de las pruebas. |
+| [`docs/BITACORA_MULTIMETRO.md`](docs/BITACORA_MULTIMETRO.md) | **Bitácora de pruebas con multímetro** de los dos Faros: continuidad, ausencia de cortos, resistencias y voltajes en 9 puntos de la perfboard. |
 | `Prototipado.fzz.zip` | **Esquemático** del Faro en Fritzing. |
 
 ### Resultados principales
@@ -21,10 +21,10 @@ El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`d
 | Prueba | Resultado |
 |---|---|
 | Pruebas automáticas | 84/84 Python en las dos Raspberry Pi · 38/38 del Worker |
-| Enlace por luz (BER 0 en 40 000 bits por sentido, con ACK) | 7,5 cm: 3000 bd (~1762 bit/s) · 15 cm y 30 cm: 3600 bd (~2105 bit/s) · 65 cm: 2700 bd (~1590 bit/s) · 100 cm: 1800 bd (~1065 bit/s) |
+| Enlace por luz (BER 0 en 40 000 bits por sentido, con ACK; 100 cm en cuarto a oscuras, el resto con luz ambiente) | 7,5 cm: 3000 bd (~1762 bit/s) · 15 cm y 30 cm: 3600 bd (~2105 bit/s) · 65 cm: 2700 bd (~1590 bit/s) · 100 cm: 1800 bd (~1065 bit/s) |
 | Mesh con cebolla (3 relays) | Wi-Fi: 0,31 s por mensaje anónimo · por la luz a 1800 bd: 9–22 s |
 | Edge | Worker en `https://faronet.fasolis.workers.dev`: un mensaje público llega de la mesh a la sala en ~1 s; firmas del gateway (401/409), rate limit 120/min, buzón, feed y directorio |
-| Costo de los dos Faros | ₡28 722,90 según las facturas (detalle en la documentación, §3.4) |
+| Costo de los dos Faros | ₡28 722,90 según las facturas (detalle en la documentación, sección 3.6) |
 
 ---
 
