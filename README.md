@@ -2,7 +2,7 @@
 
 Proyecto 1 de Redes de Computadoras (TEC): una red mesh anónima que viaja por luz infrarroja
 (el **Faro**) y por TCP/IP, con salida controlada a Internet por el edge
-(un Worker de Cloudflare, en `edge/`).
+(un Worker de Cloudflare, en `edge/`)..
 
 Este README es el **mapa del repositorio**: qué hace cada archivo y cómo se conectan.
 El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`docs/Kickoff.md`](docs/Kickoff.md).
