@@ -7,6 +7,25 @@ Proyecto 1 de Redes de Computadoras (TEC): una red mesh anónima que viaja por l
 Este README es el **mapa del repositorio**: qué hace cada archivo y cómo se conectan.
 El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`docs/Kickoff.md`](docs/Kickoff.md).
 
+## Documentación
+
+| Documento | Contenido |
+|---|---|
+| [`docs/RFC-FaroNet.txt`](docs/RFC-FaroNet.txt) | **RFC** en ASCII de la Capa 1 (Faro) y de FaroNet: tramas, acceso al medio, mesh, cebolla, gateway y edge, manejo de versiones, Consideraciones de Privacidad y de Seguridad, vectores de prueba. |
+| [`docs/DOCUMENTACION_PRUEBAS.md`](docs/DOCUMENTACION_PRUEBAS.md) | Documentación técnica y **bitácora de pruebas**: hardware y **BOM con costos** (§3), código, pruebas automáticas, **BER y tasa efectiva por distancia** (§6), mesh y cebolla sobre Wi-Fi y sobre la luz (§7), gateway y Cloudflare (§8), comportamiento de las Raspberry Pi (§9), pendientes y trazabilidad con el enunciado. |
+| [`docs/BITACORA_MULTIMETRO.md`](docs/BITACORA_MULTIMETRO.md) | Plantilla de la **bitácora de pruebas con multímetro** (continuidad, cortos, resistencias y voltajes), con los puntos de la perfboard y los valores esperados. |
+| `Prototipado.fzz.zip` | **Esquemático** del Faro en Fritzing. |
+
+### Resultados principales
+
+| Prueba | Resultado |
+|---|---|
+| Pruebas automáticas | 84/84 Python en las dos Raspberry Pi · 38/38 del Worker |
+| Enlace por luz (BER 0 en 40 000 bits por sentido, con ACK) | 7,5 cm: 3000 bd (~1762 bit/s) · 15 cm y 30 cm: 3600 bd (~2105 bit/s) · 65 cm: 2700 bd (~1590 bit/s) · 100 cm: 1800 bd (~1065 bit/s) |
+| Mesh con cebolla (3 relays) | Wi-Fi: 0,31 s por mensaje anónimo · por la luz a 1800 bd: 9–22 s |
+| Edge | Worker en `https://faronet.fasolis.workers.dev`: un mensaje público llega de la mesh a la sala en ~1 s; firmas del gateway (401/409), rate limit 120/min, buzón, feed y directorio |
+| Costo de los dos Faros | ₡28 722,90 según las facturas (detalle en la documentación, §3.4) |
+
 ---
 
 ## Estructura
@@ -15,6 +34,8 @@ El Kick-off (introducción, ambiente, diseño y modelo de amenazas) está en [`d
 FaSolis/
 ├── README.md                    este mapa
 ├── .gitignore
+├── requirements.txt             dependencias de Python
+├── Prototipado.fzz.zip          esquemático del Faro (Fritzing)
 │
 ├── faronet/                     todo el código Python
 │   ├── faro/                    Capa 1 y hardware (la luz)
@@ -53,6 +74,9 @@ FaSolis/
 │
 └── docs/
     ├── Kickoff.md                   documento de kick-off
+    ├── RFC-FaroNet.txt              RFC (ASCII) de la Capa 1 y de FaroNet
+    ├── DOCUMENTACION_PRUEBAS.md     documentación técnica, BOM y bitácora de pruebas
+    ├── BITACORA_MULTIMETRO.md       plantilla de la bitácora del multímetro
     ├── DiagramaModelo.png           diagrama de arquitectura y hardware
     └── explicación del proyecto.pdf guía de estudio de todo el proyecto
 ```
@@ -139,6 +163,8 @@ Se corren todas con `py -m unittest discover -v` (84 pruebas). Las del Worker (3
 | Archivo | Qué hace |
 |---|---|
 | `scripts/probar_cebolla.ps1` | En Windows abre el directorio y 6 nodos encadenados (N1…N6) en `127.0.0.1`. |
+| `scripts/reinstalar_llave_gateway.ps1` | Después de usar el botón de pánico en el Faro gateway, vuelve a copiar la llave del gateway de la laptop a la Pi y muestra la llave pública para compararla con `GATEWAY_PUBKEY`. |
+| `requirements.txt` | Dependencias de Python: `pynacl` en todas las máquinas; `pyserial` y `gpiozero` solo en Linux / Raspberry Pi. |
 | `.gitignore` | Evita subir llaves (`*.llaves`, `.faronet/`), `.env`, `.dev.vars`, `__pycache__`, `node_modules`, `.wrangler/`, etc. |
 
 ---
@@ -148,8 +174,8 @@ Se corren todas con `py -m unittest discover -v` (84 pruebas). Las del Worker (3
 Todos los comandos se corren **desde la raíz del repositorio** con `-m` (en Linux/Raspberry, `python3` en lugar de `py`).
 
 ```bash
-pip install pynacl                     # mesh, cebolla, gateway y buzón
-pip install pyserial gpiozero          # solo en la Raspberry Pi (Faro)
+pip install -r requirements.txt        # pynacl (todo) + pyserial y gpiozero (solo en Linux / Raspberry Pi)
+# En la Raspberry Pi: sudo apt install python3-nacl python3-serial python3-gpiozero python3-lgpio
 
 # Pruebas
 py -m unittest discover -v
@@ -191,11 +217,8 @@ Cada programa tiene `--help` y ejemplos más completos en su docstring.
 
 ---
 
-## Pendiente (según el enunciado)
+## Estado (según el enunciado)
 
-Ya están el Faro (Capa 1), la mesh con la cebolla, el gateway y el edge en Cloudflare. Falta:
-
-- **RFC** en ASCII (Capa 1 y FaroNet, con Consideraciones de Privacidad y de Seguridad), sugerido en `docs/`.
-  Los docstrings de `capa1.py` y `cebolla.py` y el README de `edge/` ya traen formatos y limitaciones listos para usar.
-- **Documentación final**, esquemático, BOM, fotos del Faro soldado y bitácora de multímetro.
-- **`requirements.txt`**: no está en el repositorio (por ahora las dependencias se instalan a mano, ver "Cómo ejecutar").
+Están completos el Faro soldado (Capa 1), la mesh con la cebolla, el gateway, el edge en Cloudflare, el RFC, la
+documentación con las mediciones por distancia, el BOM con costos, la bitácora de multímetro, el esquemático y las
+fotos de los dos Faros (todo en `docs/`).

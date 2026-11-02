@@ -36,6 +36,9 @@ TAM_BLOB = 1024                            # igual que edge/src/buzon.ts
 TAM_NONCE = 24
 TAM_PLANO = TAM_BLOB - TAM_NONCE - 16      # 984: lo que cabe dentro de la caja
 MAX_MENSAJE = TAM_PLANO - 2                # 982 bytes de texto
+# Cloudflare bloquea (403, error 1010) el User-Agent por defecto de urllib
+# ("Python-urllib/3.x"); por eso, igual que gateway.py, se manda uno propio.
+USER_AGENT = "faronet-buzon/1"
 
 
 class BuzonError(Exception):
@@ -77,7 +80,8 @@ def abrir(llave: bytes, blob: bytes) -> bytes:
 def _pedir(metodo: str, edge: str, ident: str, cuerpo: bytes | None = None) -> tuple[int, bytes]:
     peticion = urllib.request.Request(
         f"{edge.rstrip('/')}/buzon/{ident}", data=cuerpo, method=metodo,
-        headers={"Content-Type": "application/octet-stream"} if cuerpo else {})
+        headers={"User-Agent": USER_AGENT,
+                 **({"Content-Type": "application/octet-stream"} if cuerpo else {})})
     try:
         with urllib.request.urlopen(peticion, timeout=10) as r:
             return r.status, r.read()

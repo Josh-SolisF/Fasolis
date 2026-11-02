@@ -7,7 +7,9 @@ cosas mas:
   - el otro Faro como vecino, por luz (enlace_faro.py);
   - LEDs de actividad: verde al transmitir, amarillo al recibir;
   - boton de panico: detiene el nodo, borra las llaves, rota la direccion
-    fisica y lo indica con los LEDs.
+    fisica y lo indica con los LEDs. Si esta Pi es el gateway, tambien detiene
+    gateway_nodo y borra ~/.faronet/gateway.llave (se reinstala con
+    scripts/reinstalar_llave_gateway.ps1).
 
 Ejemplo, dos Pi unidas solo por luz (cada una en su terminal SSH):
   python3 faro_nodo.py --nombre PA --puerto 9001 --baudios 2400 --intervalo-rutas 20
@@ -21,12 +23,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import subprocess
 import sys
 import threading
 
 from faronet.faro.capa1 import direccion_persistente
 from faronet.faro.enlace_faro import EnlaceFaro, mantener_enlace
 from faronet.faro.hardware import Indicadores, abrir_faro, ejecutar_panico
+from faronet.herramientas.gateway import RUTA_LLAVE as LLAVE_GATEWAY
 from faronet.mesh.identidad import Identidad
 from faronet.mesh.nodo import crear_parser, principal
 
@@ -39,6 +43,20 @@ def hexa(valor: str) -> int:
     if not 0 < n < 0xFFFF:
         raise argparse.ArgumentTypeError("la direccion debe estar entre 0001 y FFFE")
     return n
+
+
+def detener_gateway() -> bool:
+    """
+    Boton de panico en el Faro gateway: detiene el gateway_nodo de esta Pi para
+    que suelte la llave del gateway que tiene en memoria. Devuelve True si habia
+    uno corriendo. En una maquina sin pkill (Windows) no hace nada.
+    """
+    try:
+        r = subprocess.run(["pkill", "-f", "faronet.herramientas.gateway_nodo"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except OSError:
+        return False
+    return r.returncode == 0
 
 
 def leer_argumentos():
@@ -113,7 +131,15 @@ def main() -> int:
             print(f"[{args.nombre}] BOTON DE PANICO: borrando estado sensible...")
             identidad.olvidar()  # las llaves de cifrado viejas se descartan ya
             del identidad  # se sueltan las llaves en memoria; el proceso termina enseguida
-            resultado = ejecutar_panico([ruta_llaves], indicadores)
+            # La llave del gateway (si esta Pi es el gateway) tambien es estado sensible:
+            # primero se detiene el gateway que la usa y luego se borra con las demas.
+            archivos = [ruta_llaves]
+            if LLAVE_GATEWAY.exists():
+                gateway_detenido = detener_gateway()
+                archivos.append(str(LLAVE_GATEWAY))
+                print(f"[{args.nombre}] llave del gateway: se borra"
+                      + (" (gateway_nodo detenido)" if gateway_detenido else ""))
+            resultado = ejecutar_panico(archivos, indicadores)
             print(f"[{args.nombre}] llaves borradas: {len(resultado['llaves_borradas'])} archivo(s); "
                   f"nueva direccion fisica {resultado['direccion_nueva']:04X}")
         indicadores.cerrar()
